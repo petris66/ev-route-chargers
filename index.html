@@ -48,7 +48,7 @@
     </label>
 
     <label class="pill">
-      Varakm
+      Vara (km)
       <input id="bufferKm" type="number" inputmode="numeric" value="20" style="width:82px;">
     </label>
 
@@ -73,12 +73,12 @@
   </div>
 
   <div class="row" style="margin-top:8px;">
-    <input id="ocmKey" class="grow" placeholder="(Valinnainen) Open Charge Map API key">
+    <input id="ocmKey" class="grow" placeholder="Open Charge Map API key (tallentuu laitteeseen)">
     <button id="btnToggleDebug" class="secondary">Debug</button>
   </div>
 
   <div class="small muted" style="margin-top:4px;">
-    Laskenta: <b>seuraava lataus (km) = akkua − varakm</b>. Kylmällä kelillä nosta varakilometrejä.
+    Laskenta: <b>seuraava lataus (km) = akkua − vara (km)</b>. Kylmällä kelillä nosta varaa.
   </div>
 
   <div id="status" class="small" style="margin-top:8px;"></div>
@@ -112,7 +112,7 @@ const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', 
 
 tiles.on('tileerror', (e) => dbg("TILE ERROR (OSM):", e?.error?.message || "tileerror"));
 
-// IMPORTANT: featureGroup => getBounds() toimii
+// featureGroup => getBounds() toimii
 const markersLayer = L.featureGroup().addTo(map);
 
 /* ------------------ ELEMENTS ------------------ */
@@ -131,6 +131,24 @@ const elBtnToggleDebug = document.getElementById('btnToggleDebug');
 const elBtnHardReload = document.getElementById('btnHardReload');
 const elBtnUseGPS = document.getElementById('btnUseGPS');
 
+/* ------------------ OCM KEY: localStorage ------------------ */
+const OCM_KEY_STORAGE = "ocm_api_key";
+try {
+  const saved = localStorage.getItem(OCM_KEY_STORAGE);
+  if (saved) elKey.value = saved;
+} catch (e) {
+  dbg("localStorage read failed:", e?.message || String(e));
+}
+elKey.addEventListener("input", () => {
+  try {
+    const v = elKey.value.trim();
+    if (v) localStorage.setItem(OCM_KEY_STORAGE, v);
+    else localStorage.removeItem(OCM_KEY_STORAGE);
+  } catch (e) {
+    dbg("localStorage write failed:", e?.message || String(e));
+  }
+});
+
 elBtnToggleDebug.addEventListener("click", () => {
   const show = elDebug.style.display !== "block";
   elDebug.style.display = show ? "block" : "none";
@@ -144,7 +162,6 @@ elBtnHardReload.addEventListener("click", () => {
 });
 
 elBtnUseGPS.addEventListener("click", async () => {
-  // Tyhjennä fallback-lähtö ja kerro käyttäjälle
   elFromCity.value = "";
   setStatus("OK — käytetään GPS-lähtöä (jos lupa sallittu). Paina nyt 'Etsi seuraava latauspaikka'.");
 });
@@ -236,7 +253,6 @@ function pointAlongRoute(coords, targetKm) {
 }
 
 function isDcConnection(c) {
-  // OCM:ssä DC fast on usein LevelID=3 tai CurrentType sisältää "DC"
   const level = Number(c?.LevelID) || 0;
   const currentTitle = (c?.CurrentType?.Title || "").toUpperCase();
   return level === 3 || currentTitle.includes("DC");
@@ -308,7 +324,7 @@ elBtnNextCharge.addEventListener('click', async () => {
 
   if (!toName) return setStatus("Anna määränpää.", "warn");
   if (!Number.isFinite(rangeKm) || rangeKm <= 0) return setStatus("Tarkista 'Akkua (km)'.", "warn");
-  if (!Number.isFinite(bufferKm) || bufferKm < 0) return setStatus("Tarkista 'Varakm'.", "warn");
+  if (!Number.isFinite(bufferKm) || bufferKm < 0) return setStatus("Tarkista 'Vara (km)'.", "warn");
   if (!Number.isFinite(radiusKm) || radiusKm <= 0) return setStatus("Tarkista 'Hakusäde (km)'.", "warn");
   if (!Number.isFinite(minKw) || minKw < 0) return setStatus("Tarkista 'Min. teho (kW)'.", "warn");
 
@@ -316,7 +332,7 @@ elBtnNextCharge.addEventListener('click', async () => {
   dbg("Computed needKm:", needKm, "from range/buffer", rangeKm, bufferKm);
 
   if (needKm <= 0) {
-    return setStatus("Akkua − varakm = 0 km. Pienennä varakm tai syötä suurempi akkumatka.", "warn");
+    return setStatus("Akkua − vara = 0 km. Pienennä varaa tai syötä suurempi akkumatka.", "warn");
   }
 
   try {
@@ -341,19 +357,22 @@ elBtnNextCharge.addEventListener('click', async () => {
     setStatus("Haetaan reitti…");
     const route = await fetchRouteOSRM(start, to);
 
-    // Reittiviiva
     L.geoJSON({ type: "LineString", coordinates: route }, { color: "#2563eb", weight: 4 })
       .addTo(markersLayer);
 
-    // Start/End pinnit
     addPin(start.lat, start.lon, `<b>Lähtö</b><br>${start.label}`, "#0f172a");
     addPin(to.lat, to.lon, `<b>Määränpää</b><br>${to.label}`, "#7c3aed");
 
-    // Target piste: "seuraava lataus"
     const target = pointAlongRoute(route, needKm);
-    addPin(target.lat, target.lon, `<b>Seuraava lataus</b><br>${needKm.toFixed(0)} km (akkua ${rangeKm} − varat ${bufferKm})`, "#f59e0b");
+    addPin(target.lat, target.lon, `<b>Seuraava lataus</b><br>${needKm.toFixed(0)} km (akkua ${rangeKm} − vara ${bufferKm})`, "#f59e0b");
 
     setStatus("Haetaan latauspisteet…");
+
+    if (!key) {
+      setStatus("Lisää Open Charge Map API key (tallentuu laitteeseen).", "warn");
+      return;
+    }
+
     const pois = await fetchOCM({ lat: target.lat, lon: target.lon, km: radiusKm, key });
 
     const mapped = (pois || []).map(p => {
@@ -368,18 +387,16 @@ elBtnNextCharge.addEventListener('click', async () => {
       return { title, lat, lon, maxPower, dist };
     }).filter(Boolean);
 
-    // 1) ensisijainen: minKw
     let results = mapped
       .filter(x => x.maxPower >= minKw)
       .sort((a,b) => (b.maxPower - a.maxPower) || (a.dist - b.dist))
       .slice(0, 5);
 
-    // 2) fallback: jos ei löydy, näytä parhaat saatavilla
     let usedFallback = false;
     if (results.length === 0) {
       usedFallback = true;
       results = mapped
-        .filter(x => x.maxPower > 0) // dcOnly huomioitu jo maxPowerKw:ssa
+        .filter(x => x.maxPower > 0)
         .sort((a,b) => (b.maxPower - a.maxPower) || (a.dist - b.dist))
         .slice(0, 5);
     }
@@ -390,7 +407,6 @@ elBtnNextCharge.addEventListener('click', async () => {
       return;
     }
 
-    // Tulokset kartalle + listaan
     results.forEach(r => {
       L.circleMarker([r.lat, r.lon], {
         radius: 8,
@@ -436,7 +452,6 @@ elBtnNextCharge.addEventListener('click', async () => {
   }
 });
 
-// merkintä että appi latautui
 dbg("App loaded:", location.href);
 </script>
 </body>
