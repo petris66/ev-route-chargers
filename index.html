@@ -171,21 +171,30 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 12000) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
 
+  dbg("FETCH START", timeoutMs + "ms", url);
+
   try {
     const r = await fetch(url, { ...options, signal: controller.signal });
-    const text = await r.text();
 
+    // Jos päästiin tänne asti, saatiin HTTP-vastaus
+    const text = await r.text();
     dbg("HTTP", r.status, url);
 
-    if (!r.ok) {
-      throw new Error(`HTTP ${r.status}: ${text.slice(0, 180)}`);
-    }
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${text.slice(0, 180)}`);
     if (!text) return null;
     return JSON.parse(text);
+
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      // Nyt tiedetään varmasti mikä kutsu timeouttasi
+      throw new Error(`Timeout (${timeoutMs}ms): ${url}`);
+    }
+    throw e;
   } finally {
     clearTimeout(t);
   }
 }
+
 
 /* ------------------ HELPERS ------------------ */
 function setStatus(msg, cls) {
@@ -299,7 +308,7 @@ async function fetchOCM({lat, lon, km, key}) {
   });
 
   const url = "https://api.openchargemap.io/v3/poi/?" + p.toString();
-  return await fetchJsonWithTimeout(url, { headers: { "Accept": "application/json" } }, 15000);
+ return await fetchJsonWithTimeout(url, { headers: { "Accept": "application/json" } }, 30000);
 }
 
 function addPin(lat, lon, labelHtml, color) {
