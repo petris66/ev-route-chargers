@@ -3,27 +3,35 @@
 <head>
   <meta charset="utf-8" />
   <title>EV Route – Seuraava lataus</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
   <style>
-    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
-    #map { height: 45vh; }
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    /* iOS Safari: käytä svh/dvh + min-height, ettei kartta romahda */
+    #map {
+      height: 45vh;
+      height: 45svh;
+      height: 45dvh;
+      min-height: 260px;
+      width: 100%;
+    }
     main { padding: 10px; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .grow { flex: 1; }
-    button { padding: 8px 12px; border-radius: 6px; border: none; cursor: pointer; }
+    .grow { flex: 1; min-width: 210px; }
+    button { padding: 9px 12px; border-radius: 10px; border: none; cursor: pointer; }
     .primary { background: #2563eb; color: #fff; }
-    .pill { background: #f1f5f9; padding: 6px 10px; border-radius: 999px; font-size: 14px; }
-    .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
-    .meta { display: flex; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+    .ghost { background: #f1f5f9; color: #0f172a; }
+    .pill { background: #f1f5f9; padding: 6px 10px; border-radius: 999px; font-size: 14px; display:flex; gap:8px; align-items:center;}
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; margin-bottom: 8px; }
+    .meta { display: flex; gap: 6px; flex-wrap: wrap; font-size: 13px; margin-top:6px;}
     .small { font-size: 13px; }
     .warn { color: #b45309; }
     .error { color: #b91c1c; }
+    input { padding: 9px 10px; border: 1px solid #e5e7eb; border-radius: 10px; }
+    .pill input { padding: 4px 6px; border-radius: 8px; }
+    #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 200px; overflow:auto; display:none; }
   </style>
 </head>
 <body>
@@ -39,38 +47,45 @@
   <div class="row" style="margin-top:8px;">
     <label class="pill">
       Akkua (km)
-      <input id="rangeKm" type="number" value="120" style="width:80px;">
+      <input id="rangeKm" type="number" inputmode="numeric" value="120" style="width:90px;">
     </label>
 
     <label class="pill">
       Vara (km)
-      <input id="reserveKm" type="number" value="20" style="width:70px;">
+      <input id="reserveKm" type="number" inputmode="numeric" value="20" style="width:80px;">
     </label>
 
     <label class="pill">
       Hakusäde (km)
-      <input id="radiusKm" type="number" value="40" style="width:70px;">
+      <input id="radiusKm" type="number" inputmode="numeric" value="40" style="width:80px;">
     </label>
 
-    <button id="btnFind" class="primary">
-      Etsi seuraava lataus
-    </button>
+    <button id="btnFind" class="primary">Etsi seuraava lataus</button>
+    <button id="btnHardReload" class="ghost" title="Jos iPhone näyttää vanhaa versiota">Päivitä “kovaa”</button>
+    <button id="btnDebug" class="ghost">Debug</button>
   </div>
 
   <div id="status" class="small" style="margin-top:8px;"></div>
   <div id="list" style="margin-top:10px;"></div>
+  <pre id="debug" class="small"></pre>
 </main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-/* ------------------ MAP ------------------ */
-const map = L.map('map').setView([60.1699, 24.9384], 6);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 18
-}).addTo(map);
-const layer = L.layerGroup().addTo(map);
+/* ------------------ DEBUG ------------------ */
+const elDebug = document.getElementById("debug");
+function dbg(...args) {
+  const line = args.map(a => {
+    if (typeof a === "string") return a;
+    try { return JSON.stringify(a); } catch { return String(a); }
+  }).join(" ");
+  elDebug.textContent += line + "\n";
+  elDebug.scrollTop = elDebug.scrollHeight;
+}
+window.addEventListener("error", (e) => dbg("JS ERROR:", e.message));
+window.addEventListener("unhandledrejection", (e) => dbg("PROMISE ERROR:", String(e.reason)));
 
-/* ------------------ ELEMENTS ------------------ */
+/* ------------------ UI ------------------ */
 const elFrom = document.getElementById('fromCity');
 const elTo = document.getElementById('toCity');
 const elRange = document.getElementById('rangeKm');
@@ -79,13 +94,48 @@ const elRadius = document.getElementById('radiusKm');
 const elBtn = document.getElementById('btnFind');
 const elStatus = document.getElementById('status');
 const elList = document.getElementById('list');
+const elBtnHardReload = document.getElementById('btnHardReload');
+const elBtnDebug = document.getElementById('btnDebug');
 
-/* ------------------ HELPERS ------------------ */
 function setStatus(msg, cls="") {
   elStatus.className = "small " + cls;
   elStatus.textContent = msg;
+  dbg("STATUS:", msg);
 }
 
+elBtnDebug.onclick = () => {
+  elDebug.style.display = (elDebug.style.display === "block") ? "none" : "block";
+  dbg("Debug toggled");
+};
+
+elBtnHardReload.onclick = () => {
+  const u = new URL(location.href);
+  u.searchParams.set("v", String(Date.now()));
+  location.replace(u.toString());
+};
+
+/* ------------------ MAP (init after DOM ready) ------------------ */
+let map, layer;
+
+function initMap() {
+  map = L.map('map').setView([60.1699, 24.9384], 6);
+
+  const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+
+  tiles.on('tileerror', () => dbg("TILE ERROR"));
+
+  layer = L.layerGroup().addTo(map);
+
+  // iOS/Leaflet: pakota uudelleenlaskenta kun layout on valmis
+  setTimeout(() => {
+    try { map.invalidateSize(); dbg("invalidateSize OK"); } catch(e) { dbg("invalidateSize ERR", e?.message||String(e)); }
+  }, 300);
+}
+
+/* ------------------ HELPERS ------------------ */
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2-lat1) * Math.PI/180;
@@ -145,19 +195,32 @@ function pointAlongRoute(coords, km) {
 
 async function fetchOCM(lat, lon, km) {
   const p = new URLSearchParams({
-    latitude: lat,
-    longitude: lon,
-    distance: km,
+    latitude: String(lat),
+    longitude: String(lon),
+    distance: String(km),
     distanceunit: "KM",
-    maxresults: 40
+    maxresults: "40"
   });
 
-  const url =
-    "https://ocm-proxy.petri-suokas.workers.dev/ocm?" + p.toString();
+  // Cloudflare Worker (sinun)
+  const url = "https://ocm-proxy.petri-suokas.workers.dev/ocm?" + p.toString();
 
-  const r = await fetch(url);
-  if (!r.ok) throw new Error("OCM fetch failed");
+  dbg("OCM URL:", url);
+
+  const r = await fetch(url, { headers: { "Accept": "application/json" }, cache: "no-store" });
+  if (!r.ok) throw new Error("OCM fetch failed: HTTP " + r.status);
   return await r.json();
+}
+
+function safeFitBounds() {
+  try {
+    const bounds = layer.getBounds?.();
+    if (bounds && bounds.isValid && bounds.isValid()) {
+      map.fitBounds(bounds, { padding:[20,20] });
+    }
+  } catch (e) {
+    dbg("fitBounds error:", e?.message || String(e));
+  }
 }
 
 /* ------------------ MAIN ------------------ */
@@ -168,15 +231,17 @@ elBtn.onclick = async () => {
   const toName = elTo.value.trim();
   if (!toName) return setStatus("Anna määränpää.", "warn");
 
-  const usableKm = Math.max(0, +elRange.value - +elReserve.value);
+  const usableKm = Math.max(0, Number(elRange.value) - Number(elReserve.value));
+  if (usableKm <= 0) return setStatus("Akkua − vara = 0 km. Pienennä varaa tai nosta akkua.", "warn");
 
   try {
     setStatus("Haetaan lähtö ja määränpää…");
 
     let start = await getStart();
     if (!start) {
-      if (!elFrom.value) return setStatus("Anna lähtökaupunki.", "warn");
-      start = await geocode(elFrom.value);
+      const fromName = elFrom.value.trim();
+      if (!fromName) return setStatus("GPS ei käytettävissä – anna lähtökaupunki.", "warn");
+      start = await geocode(fromName);
     }
     const end = await geocode(toName);
     if (!start || !end) throw new Error("Geokoodaus epäonnistui");
@@ -184,23 +249,73 @@ elBtn.onclick = async () => {
     setStatus("Haetaan reitti…");
     const route = await fetchRoute(start, end);
 
-    L.geoJSON({ type:"LineString", coordinates: route },
-      { color:"#2563eb", weight:4 }
-    ).addTo(layer);
+    L.geoJSON({ type:"LineString", coordinates: route }, { color:"#2563eb", weight:4 }).addTo(layer);
 
     const target = pointAlongRoute(route, usableKm);
+    L.circleMarker([target.lat, target.lon], { radius:8, color:"#f59e0b", fillOpacity:0.9 })
+      .addTo(layer).bindPopup(`<b>Seuraava lataus</b><br>${usableKm.toFixed(0)} km`);
+
+    // varmistetaan että kartta piirtää oikein myös iOS:llä
+    setTimeout(() => map.invalidateSize(), 50);
 
     setStatus("Haetaan latauspisteet…");
-    const pois = await fetchOCM(target.lat, target.lon, +elRadius.value);
+    const pois = await fetchOCM(target.lat, target.lon, Number(elRadius.value));
 
-    let results = pois
-      .map(p => {
-        const ai = p.AddressInfo || {};
-        const conns = p.Connections || [];
-        const maxPower = Math.max(...conns.map(c=>c.PowerKW||0), 0);
-        const isDC = conns.some(c=>c.CurrentTypeID === 30);
-        return {
-          title: ai.Title,
-          lat: ai.Latitude,
-          lon: ai.Longitude,
-          maxPower,
+    // “Vain DC”: OCM:ssa LevelID=3 viittaa tyypillisesti DC-lataukseen
+    const mapped = (pois || []).map(p => {
+      const ai = p.AddressInfo || {};
+      const conns = p.Connections || [];
+      const maxPower = Math.max(...conns.map(c => Number(c.PowerKW) || 0), 0);
+      const isDC = conns.some(c => Number(c.LevelID) === 3 || (c.CurrentType?.Title || "").toUpperCase().includes("DC"));
+      return {
+        title: ai.Title || "Nimetön latauspaikka",
+        lat: Number(ai.Latitude),
+        lon: Number(ai.Longitude),
+        maxPower,
+        isDC,
+        dist: haversineKm(target.lat, target.lon, Number(ai.Latitude), Number(ai.Longitude))
+      };
+    }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.isDC);
+
+    let fast = mapped.filter(x => x.maxPower >= 150);
+    let final = (fast.length ? fast : mapped)
+      .sort((a,b)=>(b.maxPower-a.maxPower)||(a.dist-b.dist))
+      .slice(0,5);
+
+    final.forEach(r => {
+      L.circleMarker([r.lat,r.lon], { radius:8, color:"green", fillOpacity:0.9 })
+        .addTo(layer)
+        .bindPopup(`<b>${r.title}</b><br>${Math.round(r.maxPower)} kW<br>${r.dist.toFixed(1)} km`);
+
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <b>${r.title}</b>
+        <div class="meta">
+          <span class="pill">${Math.round(r.maxPower)} kW</span>
+          <span class="pill">${r.dist.toFixed(1)} km</span>
+        </div>
+        <button class="primary" style="margin-top:8px;">Navigoi</button>
+      `;
+      card.querySelector("button").onclick = () =>
+        window.open(`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}`, "_blank");
+      elList.appendChild(card);
+    });
+
+    safeFitBounds();
+    setStatus(`Löytyi ${final.length} sopivaa latauspaikkaa.`);
+  } catch (e) {
+    console.error(e);
+    dbg("CATCH:", e?.message || String(e));
+    setStatus("Haku epäonnistui: " + (e?.message || String(e)), "error");
+  }
+};
+
+/* init */
+document.addEventListener("DOMContentLoaded", () => {
+  initMap();
+  setStatus("Valmis. Syötä määränpää ja hae seuraava lataus.");
+});
+</script>
+</body>
+</html>
