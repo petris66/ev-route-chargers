@@ -100,8 +100,8 @@ const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', 
 tiles.on('tileerror', (e) => {
   dbg("TILE ERROR (OSM):", e?.error?.message || "tileerror");
 });
-
-const markersLayer = L.layerGroup().addTo(map);
+  
+const markersLayer = L.featureGroup().addTo(map);
 
 /* ------------------ ELEMENTS ------------------ */
 const elFromCity = document.getElementById('fromCity');
