@@ -331,7 +331,10 @@ elBtnNextCharge.addEventListener('click', async () => {
 
     if (results.length === 0) {
       setStatus(`Ei löytynyt tehorajalla ≥${minKw} kW säteellä ${radiusKm} km. Kokeile isompaa säteyttä tai pienempää tehorajaa.`, "warn");
-      map.fitBounds(markersLayer.getBounds(), { padding: [20,20] });
+      if (markersLayer.getLayers().length > 0) {
+  map.fitBounds(markersLayer.getBounds(), { padding: [20,20] });
+}
+
       return;
     }
 
@@ -365,7 +368,10 @@ elBtnNextCharge.addEventListener('click', async () => {
       elList.appendChild(card);
     });
 
-    map.fitBounds(markersLayer.getBounds(), { padding: [20,20] });
+    if (markersLayer.getLayers().length > 0) {
+  map.fitBounds(markersLayer.getBounds(), { padding: [20,20] });
+}
+
     setStatus(`Löytyi ${results.length} parasta ≥${minKw} kW latauspaikkaa.`);
   } catch (e) {
     dbg("CATCH:", e?.message || String(e));
