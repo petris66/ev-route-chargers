@@ -27,6 +27,8 @@
     .pill input { padding: 4px 6px; border-radius: 8px; }
     #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 160px; overflow:auto; display:none; }
     .muted { color:#64748b; }
+    label.chk { display:flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; background:#f1f5f9; font-size:14px; }
+    label.chk input { width:18px; height:18px; }
   </style>
 </head>
 <body>
@@ -41,8 +43,13 @@
 
   <div class="row" style="margin-top:8px;">
     <label class="pill">
-      Seuraava lataus (km)
-      <input id="nextKm" type="number" inputmode="numeric" value="120" style="width:92px;">
+      Akkua (km)
+      <input id="rangeKm" type="number" inputmode="numeric" value="140" style="width:92px;">
+    </label>
+
+    <label class="pill">
+      Varakm
+      <input id="bufferKm" type="number" inputmode="numeric" value="20" style="width:82px;">
     </label>
 
     <label class="pill">
@@ -55,7 +62,13 @@
       <input id="minKw" type="number" inputmode="numeric" value="150" style="width:82px;">
     </label>
 
+    <label class="chk" title="Suodattaa AC/type2 pois ja näyttää vain DC-pikalatauksen">
+      <input id="dcOnly" type="checkbox" checked>
+      Vain DC pikalataus
+    </label>
+
     <button id="btnNextCharge" class="primary">Etsi seuraava latauspaikka</button>
+    <button id="btnUseGPS" class="ghost" title="Tyhjentää lähtökentän ja käyttää GPS:ää jos sallittu">Käytä GPS-lähtöä</button>
     <button id="btnHardReload" class="ghost" title="Jos iPhone näyttää vanhaa versiota">Päivitä “kovaa”</button>
   </div>
 
@@ -65,7 +78,7 @@
   </div>
 
   <div class="small muted" style="margin-top:4px;">
-    Vinkki iPhonella: jos GPS ei toimi, kirjoita lähtökaupunki. Debug-nappi näyttää virheet ja vaiheet.
+    Laskenta: <b>seuraava lataus (km) = akkua − varakm</b>. Kylmällä kelillä nosta varakilometrejä.
   </div>
 
   <div id="status" class="small" style="margin-top:8px;"></div>
@@ -97,24 +110,26 @@ const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', 
   attribution: '&copy; OpenStreetMap'
 }).addTo(map);
 
-tiles.on('tileerror', (e) => {
-  dbg("TILE ERROR (OSM):", e?.error?.message || "tileerror");
-});
-  
+tiles.on('tileerror', (e) => dbg("TILE ERROR (OSM):", e?.error?.message || "tileerror"));
+
+// IMPORTANT: featureGroup => getBounds() toimii
 const markersLayer = L.featureGroup().addTo(map);
 
 /* ------------------ ELEMENTS ------------------ */
 const elFromCity = document.getElementById('fromCity');
 const elToCity = document.getElementById('toCity');
-const elNextKm = document.getElementById('nextKm');
+const elRangeKm = document.getElementById('rangeKm');
+const elBufferKm = document.getElementById('bufferKm');
 const elNextRadiusKm = document.getElementById('nextRadiusKm');
 const elMinKw = document.getElementById('minKw');
+const elDcOnly = document.getElementById('dcOnly');
 const elBtnNextCharge = document.getElementById('btnNextCharge');
 const elStatus = document.getElementById('status');
 const elList = document.getElementById('list');
 const elKey = document.getElementById('ocmKey');
 const elBtnToggleDebug = document.getElementById('btnToggleDebug');
 const elBtnHardReload = document.getElementById('btnHardReload');
+const elBtnUseGPS = document.getElementById('btnUseGPS');
 
 elBtnToggleDebug.addEventListener("click", () => {
   const show = elDebug.style.display !== "block";
@@ -123,10 +138,15 @@ elBtnToggleDebug.addEventListener("click", () => {
 });
 
 elBtnHardReload.addEventListener("click", () => {
-  // iOS Safari cache: lisää URL:iin "v=" parametri
   const u = new URL(location.href);
   u.searchParams.set("v", String(Date.now()));
   location.replace(u.toString());
+});
+
+elBtnUseGPS.addEventListener("click", async () => {
+  // Tyhjennä fallback-lähtö ja kerro käyttäjälle
+  elFromCity.value = "";
+  setStatus("OK — käytetään GPS-lähtöä (jos lupa sallittu). Paina nyt 'Etsi seuraava latauspaikka'.");
 });
 
 /* ------------------ HELPERS ------------------ */
@@ -149,14 +169,11 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 }
 
 async function geocode(placeName) {
-  // iOS/Safari: älä yritä asettaa User-Agent/Referer — selain estää sen ja koko skripti voi kaatua.
   const url =
     "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
     encodeURIComponent(placeName);
 
-  const r = await fetch(url, {
-    headers: { "Accept": "application/json" }
-  });
+  const r = await fetch(url, { headers: { "Accept": "application/json" }});
   if (!r.ok) {
     dbg("GEOCODE HTTP", r.status);
     return null;
@@ -164,6 +181,7 @@ async function geocode(placeName) {
 
   const j = await r.json();
   if (!j[0]) return null;
+
   return { lat: +j[0].lat, lon: +j[0].lon, label: placeName };
 }
 
@@ -217,15 +235,25 @@ function pointAlongRoute(coords, targetKm) {
   return { lat:last[1], lon:last[0] };
 }
 
-function maxPowerKw(poi) {
+function isDcConnection(c) {
+  // OCM:ssä DC fast on usein LevelID=3 tai CurrentType sisältää "DC"
+  const level = Number(c?.LevelID) || 0;
+  const currentTitle = (c?.CurrentType?.Title || "").toUpperCase();
+  return level === 3 || currentTitle.includes("DC");
+}
+
+function maxPowerKw(poi, dcOnly) {
   const conns = poi?.Connections || [];
   let maxKw = 0;
 
   for (const c of conns) {
+    if (dcOnly && !isDcConnection(c)) continue;
+
     const kw = Number(c?.PowerKW) || 0;
     const amps = Number(c?.Amps) || 0;
     const volts = Number(c?.Voltage) || 0;
     const inferred = (amps && volts) ? (amps * volts / 1000) : 0;
+
     maxKw = Math.max(maxKw, kw, inferred);
   }
   return maxKw;
@@ -256,23 +284,40 @@ function addPin(lat, lon, labelHtml, color) {
   }).addTo(markersLayer).bindPopup(labelHtml);
 }
 
+function safeFitBounds() {
+  if (markersLayer.getLayers().length > 0) {
+    map.fitBounds(markersLayer.getBounds(), { padding: [20,20] });
+  }
+}
+
 /* ------------------ MAIN LOGIC ------------------ */
 elBtnNextCharge.addEventListener('click', async () => {
   markersLayer.clearLayers();
   elList.innerHTML = "";
   elStatus.textContent = "";
 
-  const needKm = Number(elNextKm.value);
+  const rangeKm = Number(elRangeKm.value);
+  const bufferKm = Number(elBufferKm.value);
   const radiusKm = Number(elNextRadiusKm.value);
   const minKw = Number(elMinKw.value);
+  const dcOnly = !!elDcOnly.checked;
+
   const toName = elToCity.value.trim();
   const fromFallback = elFromCity.value.trim();
   const key = elKey.value.trim();
 
   if (!toName) return setStatus("Anna määränpää.", "warn");
-  if (!Number.isFinite(needKm) || needKm <= 0) return setStatus("Tarkista 'Seuraava lataus (km)'.", "warn");
+  if (!Number.isFinite(rangeKm) || rangeKm <= 0) return setStatus("Tarkista 'Akkua (km)'.", "warn");
+  if (!Number.isFinite(bufferKm) || bufferKm < 0) return setStatus("Tarkista 'Varakm'.", "warn");
   if (!Number.isFinite(radiusKm) || radiusKm <= 0) return setStatus("Tarkista 'Hakusäde (km)'.", "warn");
   if (!Number.isFinite(minKw) || minKw < 0) return setStatus("Tarkista 'Min. teho (kW)'.", "warn");
+
+  const needKm = Math.max(0, rangeKm - bufferKm);
+  dbg("Computed needKm:", needKm, "from range/buffer", rangeKm, bufferKm);
+
+  if (needKm <= 0) {
+    return setStatus("Akkua − varakm = 0 km. Pienennä varakm tai syötä suurempi akkumatka.", "warn");
+  }
 
   try {
     setStatus("Haetaan lähtö ja määränpää…");
@@ -280,7 +325,7 @@ elBtnNextCharge.addEventListener('click', async () => {
     let start = await getStartLocationOrFallback();
     if (!start) {
       if (!fromFallback) {
-        setStatus("GPS ei käytettävissä – anna lähtökaupunki.", "warn");
+        setStatus("GPS ei käytettävissä – anna lähtökaupunki (tai salli sijainti).", "warn");
         return;
       }
       start = await geocode(fromFallback);
@@ -304,40 +349,48 @@ elBtnNextCharge.addEventListener('click', async () => {
     addPin(start.lat, start.lon, `<b>Lähtö</b><br>${start.label}`, "#0f172a");
     addPin(to.lat, to.lon, `<b>Määränpää</b><br>${to.label}`, "#7c3aed");
 
-    // Target
+    // Target piste: "seuraava lataus"
     const target = pointAlongRoute(route, needKm);
-    addPin(target.lat, target.lon, `<b>Target</b><br>${needKm} km reitillä`, "#f59e0b");
+    addPin(target.lat, target.lon, `<b>Seuraava lataus</b><br>${needKm.toFixed(0)} km (akkua ${rangeKm} − varat ${bufferKm})`, "#f59e0b");
 
     setStatus("Haetaan latauspisteet…");
     const pois = await fetchOCM({ lat: target.lat, lon: target.lon, km: radiusKm, key });
 
-    const results = (pois || [])
-      .map(p => {
-        const ai = p?.AddressInfo || {};
-        const lat = Number(ai?.Latitude);
-        const lon = Number(ai?.Longitude);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const mapped = (pois || []).map(p => {
+      const ai = p?.AddressInfo || {};
+      const lat = Number(ai?.Latitude);
+      const lon = Number(ai?.Longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
-        const title = ai?.Title || ai?.AddressLine1 || "Nimetön latauspaikka";
-        const maxPower = maxPowerKw(p);
-        const dist = haversineKm(target.lat, target.lon, lat, lon);
+      const title = ai?.Title || ai?.AddressLine1 || "Nimetön latauspaikka";
+      const maxPower = maxPowerKw(p, dcOnly);
+      const dist = haversineKm(target.lat, target.lon, lat, lon);
+      return { title, lat, lon, maxPower, dist };
+    }).filter(Boolean);
 
-        return { title, lat, lon, maxPower, dist };
-      })
-      .filter(Boolean)
+    // 1) ensisijainen: minKw
+    let results = mapped
       .filter(x => x.maxPower >= minKw)
       .sort((a,b) => (b.maxPower - a.maxPower) || (a.dist - b.dist))
       .slice(0, 5);
 
+    // 2) fallback: jos ei löydy, näytä parhaat saatavilla
+    let usedFallback = false;
     if (results.length === 0) {
-      setStatus(`Ei löytynyt tehorajalla ≥${minKw} kW säteellä ${radiusKm} km. Kokeile isompaa säteyttä tai pienempää tehorajaa.`, "warn");
-      if (markersLayer.getLayers().length > 0) {
-  map.fitBounds(markersLayer.getBounds(), { padding: [20,20] });
-}
+      usedFallback = true;
+      results = mapped
+        .filter(x => x.maxPower > 0) // dcOnly huomioitu jo maxPowerKw:ssa
+        .sort((a,b) => (b.maxPower - a.maxPower) || (a.dist - b.dist))
+        .slice(0, 5);
+    }
 
+    if (results.length === 0) {
+      setStatus(`Ei löytynyt sopivia latauspisteitä (DCOnly=${dcOnly ? "kyllä" : "ei"}) säteellä ${radiusKm} km. Kokeile isompaa säteyttä tai ota DCOnly pois.`, "warn");
+      safeFitBounds();
       return;
     }
 
+    // Tulokset kartalle + listaan
     results.forEach(r => {
       L.circleMarker([r.lat, r.lon], {
         radius: 8,
@@ -354,6 +407,7 @@ elBtnNextCharge.addEventListener('click', async () => {
         <div class="meta">
           <span class="pill">${Math.round(r.maxPower)} kW</span>
           <span class="pill">${r.dist.toFixed(1)} km</span>
+          <span class="pill">Target: ${needKm.toFixed(0)} km</span>
         </div>
         <button class="primary" style="margin-top:8px;">Navigoi</button>
       `;
@@ -368,18 +422,21 @@ elBtnNextCharge.addEventListener('click', async () => {
       elList.appendChild(card);
     });
 
-    if (markersLayer.getLayers().length > 0) {
-  map.fitBounds(markersLayer.getBounds(), { padding: [20,20] });
-}
+    safeFitBounds();
 
-    setStatus(`Löytyi ${results.length} parasta ≥${minKw} kW latauspaikkaa.`);
+    if (usedFallback) {
+      setStatus(`Ei löytynyt ≥${minKw} kW (${dcOnly ? "vain DC" : "DC/AC"}) säteellä ${radiusKm} km — näytetään parhaat saatavilla olevat (${results.length} kpl).`, "warn");
+    } else {
+      setStatus(`Löytyi ${results.length} parasta ≥${minKw} kW (${dcOnly ? "vain DC" : "DC/AC"}) latauspaikkaa.`);
+    }
+
   } catch (e) {
     dbg("CATCH:", e?.message || String(e));
     setStatus("Haku epäonnistui. Avaa Debug ja katso missä kohtaa se kaatuu (OSRM / OCM / Geocode).", "error");
   }
 });
 
-// pieni merkintä että appi latautui
+// merkintä että appi latautui
 dbg("App loaded:", location.href);
 </script>
 </body>
