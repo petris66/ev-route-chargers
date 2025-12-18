@@ -25,7 +25,7 @@
     .error { color: #b91c1c; }
     input { padding: 9px 10px; border: 1px solid #e5e7eb; border-radius: 10px; }
     .pill input { padding: 4px 6px; border-radius: 8px; }
-    #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 180px; overflow:auto; display:none; }
+    #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 200px; overflow:auto; display:none; }
     .muted { color:#64748b; }
     label.chk { display:flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; background:#f1f5f9; font-size:14px; }
     label.chk input { width:18px; height:18px; }
@@ -131,6 +131,23 @@ const elBtnToggleDebug = document.getElementById('btnToggleDebug');
 const elBtnHardReload = document.getElementById('btnHardReload');
 const elBtnUseGPS = document.getElementById('btnUseGPS');
 
+elBtnToggleDebug.addEventListener("click", () => {
+  const show = elDebug.style.display !== "block";
+  elDebug.style.display = show ? "block" : "none";
+  if (show) dbg("Debug ON —", new Date().toISOString());
+});
+
+elBtnHardReload.addEventListener("click", () => {
+  const u = new URL(location.href);
+  u.searchParams.set("v", String(Date.now()));
+  location.replace(u.toString());
+});
+
+elBtnUseGPS.addEventListener("click", () => {
+  elFromCity.value = "";
+  setStatus("OK — käytetään GPS-lähtöä (jos lupa sallittu). Paina nyt 'Etsi seuraava latauspaikka'.");
+});
+
 /* ------------------ OCM KEY: localStorage ------------------ */
 const OCM_KEY_STORAGE = "ocm_api_key";
 try {
@@ -149,24 +166,9 @@ elKey.addEventListener("input", () => {
   }
 });
 
-elBtnToggleDebug.addEventListener("click", () => {
-  const show = elDebug.style.display !== "block";
-  elDebug.style.display = show ? "block" : "none";
-  if (show) dbg("Debug ON —", new Date().toISOString());
-});
+/* ------------------ NETWORK (ONE PLACE ONLY) ------------------ */
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-elBtnHardReload.addEventListener("click", () => {
-  const u = new URL(location.href);
-  u.searchParams.set("v", String(Date.now()));
-  location.replace(u.toString());
-});
-
-elBtnUseGPS.addEventListener("click", async () => {
-  elFromCity.value = "";
-  setStatus("OK — käytetään GPS-lähtöä (jos lupa sallittu). Paina nyt 'Etsi seuraava latauspaikka'.");
-});
-
-/* ------------------ NETWORK: fetch + timeout ------------------ */
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 12000) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -175,18 +177,16 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 12000) {
 
   try {
     const r = await fetch(url, { ...options, signal: controller.signal });
-
-    // Jos päästiin tänne asti, saatiin HTTP-vastaus
     const text = await r.text();
+
     dbg("HTTP", r.status, url);
 
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${text.slice(0, 180)}`);
     if (!text) return null;
-    return JSON.parse(text);
 
+    return JSON.parse(text);
   } catch (e) {
     if (e?.name === "AbortError") {
-      // Nyt tiedetään varmasti mikä kutsu timeouttasi
       throw new Error(`Timeout (${timeoutMs}ms): ${url}`);
     }
     throw e;
@@ -195,6 +195,27 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 12000) {
   }
 }
 
+async function fetchJsonWithRetry(url, options, timeoutMs, attempts = 2) {
+  let lastErr = null;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      dbg("RETRY", i + "/" + attempts, url);
+      return await fetchJsonWithTimeout(url, options, timeoutMs);
+    } catch (e) {
+      lastErr = e;
+      const msg = e?.message || String(e);
+      dbg("RETRY FAIL", i + "/" + attempts, msg);
+
+      // retry vain tyypillisissä mobiiliverkko-ongelmissa
+      if (i < attempts && (msg.includes("Timeout") || msg.includes("Failed to fetch"))) {
+        await sleep(650 * i);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
 
 /* ------------------ HELPERS ------------------ */
 function setStatus(msg, cls) {
@@ -220,9 +241,8 @@ async function geocode(placeName) {
     "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
     encodeURIComponent(placeName);
 
-  const j = await fetchJsonWithTimeout(url, { headers: { "Accept": "application/json" } }, 12000);
+  const j = await fetchJsonWithTimeout(url, { headers: { "Accept": "application/json" } }, 15000);
   if (!j || !j[0]) return null;
-
   return { lat: +j[0].lat, lon: +j[0].lon, label: placeName };
 }
 
@@ -250,9 +270,8 @@ async function fetchRouteOSRM(start, end) {
     `https://router.project-osrm.org/route/v1/driving/` +
     `${start.lon},${start.lat};${end.lon},${end.lat}?overview=full&geometries=geojson`;
 
-  const j = await fetchJsonWithTimeout(url, {}, 12000);
+  const j = await fetchJsonWithTimeout(url, {}, 15000);
   const coords = j?.routes?.[0]?.geometry?.coordinates;
-
   if (!coords || !Array.isArray(coords) || coords.length < 2) {
     throw new Error("OSRM: reittiä ei löytynyt");
   }
@@ -283,7 +302,6 @@ function isDcConnection(c) {
 function maxPowerKw(poi, dcOnly) {
   const conns = poi?.Connections || [];
   let maxKw = 0;
-
   for (const c of conns) {
     if (dcOnly && !isDcConnection(c)) continue;
 
@@ -303,12 +321,18 @@ async function fetchOCM({lat, lon, km, key}) {
     longitude: String(lon),
     distance: String(km),
     distanceunit: "KM",
-    maxresults: "100",
+    maxresults: "30",  // pienempi payload mobiilille
     key: key || ""
   });
 
   const url = "https://api.openchargemap.io/v3/poi/?" + p.toString();
- return await fetchJsonWithTimeout(url, { headers: { "Accept": "application/json" } }, 30000);
+
+  return await fetchJsonWithRetry(
+    url,
+    { headers: { "Accept": "application/json" }, cache: "no-store" },
+    30000,
+    2
+  );
 }
 
 function addPin(lat, lon, labelHtml, color) {
@@ -368,7 +392,6 @@ elBtnNextCharge.addEventListener('click', async () => {
     }
 
     const to = await geocode(toName);
-
     if (!start || !to) {
       setStatus("Geokoodaus epäonnistui. Kokeile esim. 'Helsinki, Finland' / 'Turku, Finland'.", "error");
       return;
@@ -391,11 +414,11 @@ elBtnNextCharge.addEventListener('click', async () => {
       "#f59e0b"
     );
 
-    setStatus("Haetaan latauspisteet…");
+    safeFitBounds();
 
+    setStatus("Haetaan latauspisteet…");
     if (!key) {
       setStatus("Lisää Open Charge Map API key (tallentuu laitteeseen).", "warn");
-      safeFitBounds();
       return;
     }
 
@@ -410,6 +433,7 @@ elBtnNextCharge.addEventListener('click', async () => {
       const title = ai?.Title || ai?.AddressLine1 || "Nimetön latauspaikka";
       const maxPower = maxPowerKw(p, dcOnly);
       const dist = haversineKm(target.lat, target.lon, lat, lon);
+
       return { title, lat, lon, maxPower, dist };
     }).filter(Boolean);
 
@@ -419,7 +443,7 @@ elBtnNextCharge.addEventListener('click', async () => {
       .sort((a,b) => (b.maxPower - a.maxPower) || (a.dist - b.dist))
       .slice(0, 5);
 
-    // 2) fallback: jos ei löydy, näytä parhaat saatavilla
+    // 2) fallback: jos ei löydy, näytä parhaat saatavilla (mutta edelleen maxPower > 0)
     let usedFallback = false;
     if (results.length === 0) {
       usedFallback = true;
@@ -431,7 +455,6 @@ elBtnNextCharge.addEventListener('click', async () => {
 
     if (results.length === 0) {
       setStatus(`Ei löytynyt sopivia latauspisteitä (DCOnly=${dcOnly ? "kyllä" : "ei"}) säteellä ${radiusKm} km. Kokeile isompaa säteyttä tai ota DCOnly pois.`, "warn");
-      safeFitBounds();
       return;
     }
 
@@ -457,10 +480,7 @@ elBtnNextCharge.addEventListener('click', async () => {
       `;
 
       card.querySelector("button").onclick = () => {
-        window.open(
-          `https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}`,
-          "_blank"
-        );
+        window.open(`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}`, "_blank");
       };
 
       elList.appendChild(card);
@@ -474,13 +494,20 @@ elBtnNextCharge.addEventListener('click', async () => {
       setStatus(`Löytyi ${results.length} parasta ≥${minKw} kW (${dcOnly ? "vain DC" : "DC/AC"}) latauspaikkaa.`);
     }
 
-    } catch (e) {
+  } catch (e) {
     const msg = e?.message || String(e);
     dbg("CATCH:", msg);
-    setStatus("Haku epäonnistui: " + msg, "error");
+
+    if (msg.includes("openchargemap") && msg.includes("Timeout")) {
+      setStatus(
+        "OCM ei vastannut ajoissa. Kokeile: (1) vaihda Wi-Fi↔︎mobiilidata, (2) iCloud Private Relay pois, (3) yritä uudelleen.",
+        "warn"
+      );
+    } else {
+      setStatus("Haku epäonnistui: " + msg, "error");
+    }
   }
 });
-
 
 dbg("App loaded:", location.href);
 </script>
