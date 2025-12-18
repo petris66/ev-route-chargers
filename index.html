@@ -25,7 +25,7 @@
     .error { color: #b91c1c; }
     input { padding: 9px 10px; border: 1px solid #e5e7eb; border-radius: 10px; }
     .pill input { padding: 4px 6px; border-radius: 8px; }
-    #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 160px; overflow:auto; display:none; }
+    #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 180px; overflow:auto; display:none; }
     .muted { color:#64748b; }
     label.chk { display:flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; background:#f1f5f9; font-size:14px; }
     label.chk input { width:18px; height:18px; }
@@ -166,6 +166,27 @@ elBtnUseGPS.addEventListener("click", async () => {
   setStatus("OK — käytetään GPS-lähtöä (jos lupa sallittu). Paina nyt 'Etsi seuraava latauspaikka'.");
 });
 
+/* ------------------ NETWORK: fetch + timeout ------------------ */
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const r = await fetch(url, { ...options, signal: controller.signal });
+    const text = await r.text();
+
+    dbg("HTTP", r.status, url);
+
+    if (!r.ok) {
+      throw new Error(`HTTP ${r.status}: ${text.slice(0, 180)}`);
+    }
+    if (!text) return null;
+    return JSON.parse(text);
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 /* ------------------ HELPERS ------------------ */
 function setStatus(msg, cls) {
   elStatus.className = "small " + (cls || "");
@@ -190,14 +211,8 @@ async function geocode(placeName) {
     "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
     encodeURIComponent(placeName);
 
-  const r = await fetch(url, { headers: { "Accept": "application/json" }});
-  if (!r.ok) {
-    dbg("GEOCODE HTTP", r.status);
-    return null;
-  }
-
-  const j = await r.json();
-  if (!j[0]) return null;
+  const j = await fetchJsonWithTimeout(url, { headers: { "Accept": "application/json" } }, 12000);
+  if (!j || !j[0]) return null;
 
   return { lat: +j[0].lat, lon: +j[0].lon, label: placeName };
 }
@@ -226,11 +241,9 @@ async function fetchRouteOSRM(start, end) {
     `https://router.project-osrm.org/route/v1/driving/` +
     `${start.lon},${start.lat};${end.lon},${end.lat}?overview=full&geometries=geojson`;
 
-  const r = await fetch(url);
-  if (!r.ok) throw new Error("OSRM HTTP " + r.status);
-
-  const j = await r.json();
+  const j = await fetchJsonWithTimeout(url, {}, 12000);
   const coords = j?.routes?.[0]?.geometry?.coordinates;
+
   if (!coords || !Array.isArray(coords) || coords.length < 2) {
     throw new Error("OSRM: reittiä ei löytynyt");
   }
@@ -281,14 +294,12 @@ async function fetchOCM({lat, lon, km, key}) {
     longitude: String(lon),
     distance: String(km),
     distanceunit: "KM",
-    maxresults: "100"
+    maxresults: "100",
+    key: key || ""
   });
-  if (key) p.set("key", key);
 
   const url = "https://api.openchargemap.io/v3/poi/?" + p.toString();
-  const r = await fetch(url, { headers: { "Accept": "application/json" }});
-  if (!r.ok) throw new Error("OCM HTTP " + r.status);
-  return await r.json();
+  return await fetchJsonWithTimeout(url, { headers: { "Accept": "application/json" } }, 15000);
 }
 
 function addPin(lat, lon, labelHtml, color) {
@@ -364,12 +375,18 @@ elBtnNextCharge.addEventListener('click', async () => {
     addPin(to.lat, to.lon, `<b>Määränpää</b><br>${to.label}`, "#7c3aed");
 
     const target = pointAlongRoute(route, needKm);
-    addPin(target.lat, target.lon, `<b>Seuraava lataus</b><br>${needKm.toFixed(0)} km (akkua ${rangeKm} − vara ${bufferKm})`, "#f59e0b");
+    addPin(
+      target.lat,
+      target.lon,
+      `<b>Seuraava lataus</b><br>${needKm.toFixed(0)} km (akkua ${rangeKm} − vara ${bufferKm})`,
+      "#f59e0b"
+    );
 
     setStatus("Haetaan latauspisteet…");
 
     if (!key) {
       setStatus("Lisää Open Charge Map API key (tallentuu laitteeseen).", "warn");
+      safeFitBounds();
       return;
     }
 
@@ -387,11 +404,13 @@ elBtnNextCharge.addEventListener('click', async () => {
       return { title, lat, lon, maxPower, dist };
     }).filter(Boolean);
 
+    // 1) ensisijainen: minKw
     let results = mapped
       .filter(x => x.maxPower >= minKw)
       .sort((a,b) => (b.maxPower - a.maxPower) || (a.dist - b.dist))
       .slice(0, 5);
 
+    // 2) fallback: jos ei löydy, näytä parhaat saatavilla
     let usedFallback = false;
     if (results.length === 0) {
       usedFallback = true;
@@ -447,8 +466,12 @@ elBtnNextCharge.addEventListener('click', async () => {
     }
 
   } catch (e) {
-    dbg("CATCH:", e?.message || String(e));
-    setStatus("Haku epäonnistui. Avaa Debug ja katso missä kohtaa se kaatuu (OSRM / OCM / Geocode).", "error");
+    const msg = e?.name === "AbortError"
+      ? "Aikakatkaisu: palvelu ei vastannut ajoissa (kokeile uudestaan / eri verkko)."
+      : (e?.message || String(e));
+
+    dbg("CATCH:", msg);
+    setStatus("Haku epäonnistui: " + msg, "error");
   }
 });
 
