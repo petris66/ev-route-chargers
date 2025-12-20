@@ -81,17 +81,23 @@
 /* ------------------ CONFIG ------------------ */
 const OCM_PROXY_BASE = "https://ev-route-chargers.vercel.app/api/ocm";
 const LAST_KEY = "ev_route_last_success_v2";
+  const DEBUG_MODE = false; // true = debug-napit + loki näkyviin
+
 
 /* ------------------ DEBUG ------------------ */
 const elDebug = document.getElementById("debug");
 function dbg(...args) {
+  if (!DEBUG_MODE) return;
+
   const line = args.map(a => {
     if (typeof a === "string") return a;
     try { return JSON.stringify(a); } catch { return String(a); }
   }).join(" ");
+
   elDebug.textContent += line + "\n";
   elDebug.scrollTop = elDebug.scrollHeight;
 }
+
 window.addEventListener("error", (e) => dbg("JS ERROR:", e.message));
 window.addEventListener("unhandledrejection", (e) => dbg("PROMISE ERROR:", String(e.reason)));
 
