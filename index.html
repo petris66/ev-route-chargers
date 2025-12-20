@@ -83,7 +83,7 @@ function dbg(...args) {
 window.addEventListener("error", (e) => dbg("JS ERROR:", e.message));
 window.addEventListener("unhandledrejection", (e) => dbg("PROMISE ERROR:", String(e.reason)));
 
-/* --- NEW: Top10 debug listing --- */
+/* Top-10 POI debug */
 function debugTopPOIs(pois) {
   if (!Array.isArray(pois)) {
     dbg("DEBUG POI: pois is not an array");
@@ -93,14 +93,23 @@ function debugTopPOIs(pois) {
 
   pois.slice(0, 10).forEach((p, i) => {
     const title = p?.AddressInfo?.Title || "(no title)";
-    const operator = p?.OperatorInfo?.Title || "(no operator)";
+    const operator = p?.OperatorInfo?.Title || "(unknown operator)";
     const conns = p?.Connections || [];
-    const maxPower = Math.max(...conns.map(c => Number(c?.PowerKW) || 0), 0);
+
     const isDC = conns.some(c =>
       Number(c?.LevelID) === 3 ||
       String(c?.CurrentType?.Title || "").toUpperCase().includes("DC")
     );
-    dbg(`#${i+1}`, "|", title, "| operator:", operator, "| maxPower:", String(maxPower), "| DC:", String(isDC));
+
+    let maxPower = Math.max(...conns.map(c => Number(c?.PowerKW) || 0), 0);
+    if (isDC && (!maxPower || maxPower <= 0)) maxPower = 50; // fallback (DC mutta PowerKW puuttuu)
+
+    dbg(
+      `#${i+1}`, "|", title,
+      "| operator:", operator,
+      "| maxPower:", String(maxPower),
+      "| DC:", String(isDC)
+    );
   });
 }
 
@@ -149,7 +158,10 @@ function showFallbackActions(show) { elFallbackActions.style.display = show ? "f
 let map, layer;
 function initMap() {
   map = L.map('map').setView([60.1699, 24.9384], 6);
-  const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
+  const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
   tiles.on('tileerror', () => dbg("TILE ERROR"));
   layer = L.layerGroup().addTo(map);
   setTimeout(() => { try { map.invalidateSize(); dbg("invalidateSize OK"); } catch(e) {} }, 300);
@@ -318,8 +330,17 @@ function mapPoisToResults(pois, target, allowOps) {
   const mapped = (pois || []).map(p => {
     const ai = p.AddressInfo || {};
     const conns = p.Connections || [];
-    const maxPower = Math.max(...conns.map(c => Number(c.PowerKW) || 0), 0);
-    const isDC = conns.some(c => Number(c.LevelID) === 3 || (c.CurrentType?.Title || "").toUpperCase().includes("DC"));
+
+    const isDC = conns.some(c =>
+      Number(c.LevelID) === 3 ||
+      String(c.CurrentType?.Title || "").toUpperCase().includes("DC")
+    );
+
+    let maxPower = Math.max(...conns.map(c => Number(c.PowerKW) || 0), 0);
+    if (isDC && (!maxPower || maxPower <= 0)) {
+      maxPower = 50; // fallback (voit muuttaa esim 100)
+    }
+
     const operator = p.OperatorInfo?.Title || "";
     return {
       title: ai.Title || "Nimetön latauspaikka",
