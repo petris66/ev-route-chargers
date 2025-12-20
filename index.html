@@ -314,7 +314,8 @@ function renderResults(final, suffix = "") {
       <button class="primary" style="margin-top:8px;">Navigoi</button>
     `;
     card.querySelector("button").onclick = () =>
-      window.open(\`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}\`, "_blank");
+      window.open("https://www.google.com/maps/dir/?api=1&destination=" + r.lat + "," + r.lon, "_blank");
+
     elList.appendChild(card);
   });
 
