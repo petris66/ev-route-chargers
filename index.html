@@ -83,6 +83,34 @@ function dbg(...args) {
 window.addEventListener("error", (e) => dbg("JS ERROR:", e.message));
 window.addEventListener("unhandledrejection", (e) => dbg("PROMISE ERROR:", String(e.reason)));
 
+// --- TOP10 debug listing (new) ---
+function debugTopPOIs(pois) {
+  if (!Array.isArray(pois)) {
+    dbg("DEBUG POI: pois is not an array");
+    return;
+  }
+  dbg(`DEBUG POI: total returned = ${pois.length}`);
+
+  pois.slice(0, 10).forEach((p, i) => {
+    const title = p.AddressInfo?.Title || "(no title)";
+    const operator = p.OperatorInfo?.Title || "(no operator)";
+    const conns = p.Connections || [];
+    const maxPower = Math.max(...conns.map(c => Number(c.PowerKW) || 0), 0);
+    const isDC = conns.some(c =>
+      Number(c.LevelID) === 3 ||
+      (c.CurrentType?.Title || "").toUpperCase().includes("DC")
+    );
+
+    dbg(
+      `#${i+1}`,
+      "|", title,
+      "| operator:", operator,
+      "| maxPower:", maxPower,
+      "| DC:", isDC
+    );
+  });
+}
+
 /* ------------------ UI ------------------ */
 const elFrom = document.getElementById('fromCity');
 const elTo = document.getElementById('toCity');
@@ -230,9 +258,9 @@ async function fetchOCM(lat, lon, km, maxresults = 25) {
     longitude: String(lon),
     distance: String(km),
     distanceunit: "KM",
-    maxresults: String(maxresults),
-    
+    maxresults: String(maxresults)
   });
+
   const url = OCM_PROXY_BASE + "?" + p.toString();
   dbg("OCM URL:", url);
 
@@ -260,7 +288,6 @@ function operatorMatches(allow, opTitle, stationTitle) {
   return allow.some(a => hay.includes(a.toLowerCase()));
 }
 
-
 /* ------------------ RESULTS ------------------ */
 function clearUIForSearch() {
   layer.clearLayers();
@@ -287,7 +314,7 @@ function renderResults(final, suffix = "") {
       <button class="primary" style="margin-top:8px;">Navigoi</button>
     `;
     card.querySelector("button").onclick = () =>
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}`, "_blank");
+      window.open(\`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}\`, "_blank");
     elList.appendChild(card);
   });
 
@@ -313,8 +340,7 @@ function mapPoisToResults(pois, target, allowOps) {
     };
   }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.isDC);
 
- const filteredByOp = mapped.filter(x => operatorMatches(allowOps, x.operator, x.title));
-
+  const filteredByOp = mapped.filter(x => operatorMatches(allowOps, x.operator, x.title));
 
   const fast = filteredByOp.filter(x => x.maxPower >= 150);
   const final = (fast.length ? fast : filteredByOp)
@@ -389,6 +415,7 @@ async function runSearch() {
     let pois;
     try {
       pois = await fetchOCM(target.lat, target.lon, radiusKm, 25);
+      debugTopPOIs(pois); // NEW: debug list
     } catch (e) {
       const status = e?.status;
       const msg = String(e?.message || e);
@@ -398,6 +425,7 @@ async function runSearch() {
         setStatus("OCM ruuhkassa – kokeillaan pienemmällä haulla…", "warn");
         const smaller = Math.max(10, Math.round(radiusKm * 0.6));
         pois = await fetchOCM(target.lat, target.lon, smaller, 15);
+        debugTopPOIs(pois); // NEW: debug list for fallback too
       } else {
         throw e;
       }
