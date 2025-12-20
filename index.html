@@ -4,23 +4,16 @@
   <meta charset="utf-8" />
   <title>EV Route – Seuraava lataus</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
   <style>
     html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    /* iOS Safari: käytä svh/dvh + min-height, ettei kartta romahda */
-    #map {
-      height: 45vh;
-      height: 45svh;
-      height: 45dvh;
-      min-height: 260px;
-      width: 100%;
-    }
+    #map { height: 45vh; height: 45svh; height: 45dvh; min-height: 260px; width: 100%; }
     main { padding: 10px; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .grow { flex: 1; min-width: 210px; }
     button { padding: 9px 12px; border-radius: 10px; border: none; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
     .primary { background: #2563eb; color: #fff; }
     .ghost { background: #f1f5f9; color: #0f172a; }
     .pill { background: #f1f5f9; padding: 6px 10px; border-radius: 999px; font-size: 14px; display:flex; gap:8px; align-items:center;}
@@ -31,7 +24,8 @@
     .error { color: #b91c1c; }
     input { padding: 9px 10px; border: 1px solid #e5e7eb; border-radius: 10px; }
     .pill input { padding: 4px 6px; border-radius: 8px; }
-    #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 200px; overflow:auto; display:none; }
+    #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 220px; overflow:auto; display:none; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
   </style>
 </head>
 <body>
@@ -45,33 +39,33 @@
   </div>
 
   <div class="row" style="margin-top:8px;">
-    <label class="pill">
-      Akkua (km)
-      <input id="rangeKm" type="number" inputmode="numeric" value="120" style="width:90px;">
-    </label>
-
-    <label class="pill">
-      Vara (km)
-      <input id="reserveKm" type="number" inputmode="numeric" value="20" style="width:80px;">
-    </label>
-
-    <label class="pill">
-      Hakusäde (km)
-      <input id="radiusKm" type="number" inputmode="numeric" value="40" style="width:80px;">
-    </label>
+    <label class="pill">Akkua (km) <input id="rangeKm" type="number" inputmode="numeric" value="120" style="width:90px;"></label>
+    <label class="pill">Vara (km) <input id="reserveKm" type="number" inputmode="numeric" value="20" style="width:80px;"></label>
+    <label class="pill">Hakusäde (km) <input id="radiusKm" type="number" inputmode="numeric" value="40" style="width:80px;"></label>
 
     <button id="btnFind" class="primary">Etsi seuraava lataus</button>
+    <button id="btnRetry" class="ghost" style="display:none;">Yritä uudelleen</button>
     <button id="btnHardReload" class="ghost" title="Jos iPhone näyttää vanhaa versiota">Päivitä “kovaa”</button>
     <button id="btnDebug" class="ghost">Debug</button>
   </div>
 
   <div id="status" class="small" style="margin-top:8px;"></div>
+
+  <div class="actions" id="fallbackActions" style="display:none;">
+    <button id="btnShowLast" class="ghost">Näytä viimeisin onnistunut tulos</button>
+    <button id="btnClearLast" class="ghost">Tyhjennä viimeisin tulos</button>
+  </div>
+
   <div id="list" style="margin-top:10px;"></div>
   <pre id="debug" class="small"></pre>
 </main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+/* ------------------ CONFIG ------------------ */
+const OCM_PROXY_BASE = "https://ev-route-chargers.vercel.app/api/ocm"; // <-- tarvittaessa vaihda domain
+const LAST_KEY = "ev_route_last_success_v1";
+
 /* ------------------ DEBUG ------------------ */
 const elDebug = document.getElementById("debug");
 function dbg(...args) {
@@ -91,16 +85,28 @@ const elTo = document.getElementById('toCity');
 const elRange = document.getElementById('rangeKm');
 const elReserve = document.getElementById('reserveKm');
 const elRadius = document.getElementById('radiusKm');
+
 const elBtn = document.getElementById('btnFind');
-const elStatus = document.getElementById('status');
-const elList = document.getElementById('list');
+const elBtnRetry = document.getElementById('btnRetry');
 const elBtnHardReload = document.getElementById('btnHardReload');
 const elBtnDebug = document.getElementById('btnDebug');
+
+const elStatus = document.getElementById('status');
+const elList = document.getElementById('list');
+
+const elFallbackActions = document.getElementById('fallbackActions');
+const elBtnShowLast = document.getElementById('btnShowLast');
+const elBtnClearLast = document.getElementById('btnClearLast');
 
 function setStatus(msg, cls="") {
   elStatus.className = "small " + cls;
   elStatus.textContent = msg;
   dbg("STATUS:", msg);
+}
+
+function setBusy(isBusy) {
+  elBtn.disabled = isBusy;
+  elBtnRetry.disabled = isBusy;
 }
 
 elBtnDebug.onclick = () => {
@@ -114,25 +120,41 @@ elBtnHardReload.onclick = () => {
   location.replace(u.toString());
 };
 
-/* ------------------ MAP (init after DOM ready) ------------------ */
-let map, layer;
+function showRetry(show) {
+  elBtnRetry.style.display = show ? "inline-block" : "none";
+}
 
+function showFallbackActions(show) {
+  elFallbackActions.style.display = show ? "flex" : "none";
+}
+
+/* ------------------ MAP ------------------ */
+let map, layer;
 function initMap() {
   map = L.map('map').setView([60.1699, 24.9384], 6);
 
   const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 18,
-    attribution: '&copy; OpenStreetMap'
+    maxZoom: 18, attribution: '&copy; OpenStreetMap'
   }).addTo(map);
 
   tiles.on('tileerror', () => dbg("TILE ERROR"));
 
   layer = L.layerGroup().addTo(map);
 
-  // iOS/Leaflet: pakota uudelleenlaskenta kun layout on valmis
   setTimeout(() => {
     try { map.invalidateSize(); dbg("invalidateSize OK"); } catch(e) { dbg("invalidateSize ERR", e?.message||String(e)); }
   }, 300);
+}
+
+function safeFitBounds() {
+  try {
+    const bounds = layer.getBounds?.();
+    if (bounds && bounds.isValid && bounds.isValid()) {
+      map.fitBounds(bounds, { padding:[20,20] });
+    }
+  } catch (e) {
+    dbg("fitBounds error:", e?.message || String(e));
+  }
 }
 
 /* ------------------ HELPERS ------------------ */
@@ -149,9 +171,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 }
 
 async function geocode(name) {
-  const url =
-    "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
-    encodeURIComponent(name);
+  const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(name);
   const r = await fetch(url);
   const j = await r.json();
   if (!j[0]) return null;
@@ -193,46 +213,192 @@ function pointAlongRoute(coords, km) {
   return { lat:last[1], lon:last[0] };
 }
 
-async function fetchOCM(lat, lon, km) {
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function fetchJsonWithTimeout(url, timeoutMs) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      headers: { "Accept": "application/json" },
+      cache: "no-store",
+      signal: controller.signal
+    });
+
+    const text = await r.text();
+
+    // jos backend joskus palauttaa HTML:ää (524 tms), tunnistetaan se
+    const looksHtml = text.trim().toLowerCase().startsWith("<!doctype html") || text.trim().toLowerCase().startsWith("<html");
+    if (looksHtml) {
+      const err = new Error("OCM returned HTML (likely 524 timeout)");
+      err.status = 524;
+      err.body = text.slice(0, 200);
+      throw err;
+    }
+
+    let json;
+    try { json = JSON.parse(text); }
+    catch {
+      const err = new Error("Invalid JSON from proxy");
+      err.status = r.status;
+      err.body = text.slice(0, 200);
+      throw err;
+    }
+
+    if (!r.ok) {
+      const msg = json?.error || ("HTTP " + r.status);
+      const err = new Error(msg);
+      err.status = r.status;
+      err.json = json;
+      throw err;
+    }
+
+    return json;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function fetchOCM(lat, lon, km, maxresults = 25) {
   const p = new URLSearchParams({
     latitude: String(lat),
     longitude: String(lon),
     distance: String(km),
     distanceunit: "KM",
-    maxresults: "40"
+    maxresults: String(maxresults),
+    compact: "true"
   });
+  const url = OCM_PROXY_BASE + "?" + p.toString();
 
-  // Cloudflare Worker (sinun)
-  const url = "https://ocm-proxy.petri-suokas.workers.dev/ocm?" + p.toString();
-
+  // debug siististi: ei rivinvaihtoja / välilyöntejä
   dbg("OCM URL:", url);
 
-  const r = await fetch(url, { headers: { "Accept": "application/json" }, cache: "no-store" });
-  if (!r.ok) throw new Error("OCM fetch failed: HTTP " + r.status);
-  return await r.json();
-}
-
-function safeFitBounds() {
-  try {
-    const bounds = layer.getBounds?.();
-    if (bounds && bounds.isValid && bounds.isValid()) {
-      map.fitBounds(bounds, { padding:[20,20] });
+  // retry 2x + backoff
+  let lastErr = null;
+  for (let i = 1; i <= 3; i++) {
+    try {
+      // 18s timeout per yritys (OCM joskus hidas)
+      return await fetchJsonWithTimeout(url, 18000);
+    } catch (e) {
+      lastErr = e;
+      dbg("OCM try failed:", String(e?.message || e), "status:", e?.status || "");
+      if (i < 3) await sleep(500 * i);
     }
-  } catch (e) {
-    dbg("fitBounds error:", e?.message || String(e));
   }
+  throw lastErr;
 }
 
-/* ------------------ MAIN ------------------ */
-elBtn.onclick = async () => {
+/* ------------------ RESULTS RENDER ------------------ */
+function clearUIForSearch() {
+  layer.clearLayers();
+  elList.innerHTML = "";
+  showRetry(false);
+  showFallbackActions(false);
+}
+
+function renderResults(final, titleSuffix = "") {
+  elList.innerHTML = "";
+
+  final.forEach(r => {
+    L.circleMarker([r.lat,r.lon], { radius:8, color:"green", fillOpacity:0.9 })
+      .addTo(layer)
+      .bindPopup(`<b>${r.title}</b><br>${Math.round(r.maxPower)} kW<br>${r.dist.toFixed(1)} km`);
+
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <b>${r.title}</b>
+      <div class="meta">
+        <span class="pill">${Math.round(r.maxPower)} kW</span>
+        <span class="pill">${r.dist.toFixed(1)} km</span>
+      </div>
+      <button class="primary" style="margin-top:8px;">Navigoi</button>
+    `;
+    card.querySelector("button").onclick = () =>
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}`, "_blank");
+    elList.appendChild(card);
+  });
+
+  safeFitBounds();
+  setStatus(`Löytyi ${final.length} sopivaa latauspaikkaa.${titleSuffix}`);
+}
+
+function mapPoisToResults(pois, target) {
+  const mapped = (pois || []).map(p => {
+    const ai = p.AddressInfo || {};
+    const conns = p.Connections || [];
+    const maxPower = Math.max(...conns.map(c => Number(c.PowerKW) || 0), 0);
+    const isDC = conns.some(c => Number(c.LevelID) === 3 || (c.CurrentType?.Title || "").toUpperCase().includes("DC"));
+    return {
+      title: ai.Title || "Nimetön latauspaikka",
+      lat: Number(ai.Latitude),
+      lon: Number(ai.Longitude),
+      maxPower,
+      isDC,
+      dist: haversineKm(target.lat, target.lon, Number(ai.Latitude), Number(ai.Longitude))
+    };
+  }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.isDC);
+
+  const fast = mapped.filter(x => x.maxPower >= 150);
+  const final = (fast.length ? fast : mapped)
+    .sort((a,b)=>(b.maxPower-a.maxPower)||(a.dist-b.dist))
+    .slice(0,5);
+
+  return { final, usedFastFilter: fast.length > 0 };
+}
+
+/* ------------------ LAST SUCCESS STORAGE ------------------ */
+function saveLast(payload) {
+  try { localStorage.setItem(LAST_KEY, JSON.stringify(payload)); }
+  catch (e) { dbg("localStorage save failed:", String(e)); }
+}
+function loadLast() {
+  try {
+    const s = localStorage.getItem(LAST_KEY);
+    if (!s) return null;
+    return JSON.parse(s);
+  } catch { return null; }
+}
+function clearLast() {
+  try { localStorage.removeItem(LAST_KEY); } catch {}
+}
+
+function showLastIfAvailable() {
+  const last = loadLast();
+  if (!last) {
+    setStatus("Ei tallennettua aiempaa tulosta.", "warn");
+    return;
+  }
+  // piirrä reitti+target+markerit jos data löytyy
   layer.clearLayers();
   elList.innerHTML = "";
 
+  if (last.route) {
+    L.geoJSON({ type:"LineString", coordinates: last.route }, { color:"#2563eb", weight:4 }).addTo(layer);
+  }
+  if (last.target) {
+    L.circleMarker([last.target.lat, last.target.lon], { radius:8, color:"#f59e0b", fillOpacity:0.9 })
+      .addTo(layer).bindPopup(`<b>Seuraava lataus</b><br>${last.usableKm?.toFixed?.(0) ?? ""} km`);
+  }
+  if (last.results) {
+    renderResults(last.results, " (viimeisin onnistunut)");
+  } else {
+    setStatus("Tallennettu tulos oli puutteellinen.", "warn");
+  }
+}
+
+/* ------------------ MAIN SEARCH ------------------ */
+let lastSearchParams = null;
+
+async function runSearch() {
+  clearUIForSearch();
+  setBusy(true);
+
   const toName = elTo.value.trim();
-  if (!toName) return setStatus("Anna määränpää.", "warn");
+  if (!toName) { setBusy(false); return setStatus("Anna määränpää.", "warn"); }
 
   const usableKm = Math.max(0, Number(elRange.value) - Number(elReserve.value));
-  if (usableKm <= 0) return setStatus("Akkua − vara = 0 km. Pienennä varaa tai nosta akkua.", "warn");
+  if (usableKm <= 0) { setBusy(false); return setStatus("Akkua − vara = 0 km. Pienennä varaa tai nosta akkua.", "warn"); }
 
   try {
     setStatus("Haetaan lähtö ja määränpää…");
@@ -240,7 +406,7 @@ elBtn.onclick = async () => {
     let start = await getStart();
     if (!start) {
       const fromName = elFrom.value.trim();
-      if (!fromName) return setStatus("GPS ei käytettävissä – anna lähtökaupunki.", "warn");
+      if (!fromName) { setBusy(false); return setStatus("GPS ei käytettävissä – anna lähtökaupunki.", "warn"); }
       start = await geocode(fromName);
     }
     const end = await geocode(toName);
@@ -255,61 +421,73 @@ elBtn.onclick = async () => {
     L.circleMarker([target.lat, target.lon], { radius:8, color:"#f59e0b", fillOpacity:0.9 })
       .addTo(layer).bindPopup(`<b>Seuraava lataus</b><br>${usableKm.toFixed(0)} km`);
 
-    // varmistetaan että kartta piirtää oikein myös iOS:llä
     setTimeout(() => map.invalidateSize(), 50);
+    safeFitBounds();
 
     setStatus("Haetaan latauspisteet…");
-    const pois = await fetchOCM(target.lat, target.lon, Number(elRadius.value));
 
-    // “Vain DC”: OCM:ssa LevelID=3 viittaa tyypillisesti DC-lataukseen
-    const mapped = (pois || []).map(p => {
-      const ai = p.AddressInfo || {};
-      const conns = p.Connections || [];
-      const maxPower = Math.max(...conns.map(c => Number(c.PowerKW) || 0), 0);
-      const isDC = conns.some(c => Number(c.LevelID) === 3 || (c.CurrentType?.Title || "").toUpperCase().includes("DC"));
-      return {
-        title: ai.Title || "Nimetön latauspaikka",
-        lat: Number(ai.Latitude),
-        lon: Number(ai.Longitude),
-        maxPower,
-        isDC,
-        dist: haversineKm(target.lat, target.lon, Number(ai.Latitude), Number(ai.Longitude))
-      };
-    }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.isDC);
+    const radiusKm = Number(elRadius.value);
+    lastSearchParams = { route, target, usableKm, radiusKm };
 
-    let fast = mapped.filter(x => x.maxPower >= 150);
-    let final = (fast.length ? fast : mapped)
-      .sort((a,b)=>(b.maxPower-a.maxPower)||(a.dist-b.dist))
-      .slice(0,5);
+    let pois;
+    try {
+      // ensiyritys normaalilla säteellä
+      pois = await fetchOCM(target.lat, target.lon, radiusKm, 25);
+    } catch (e) {
+      // fallback: pienennä säde + maxresults, jos ruuhkaa / timeout
+      const status = e?.status;
+      const msg = String(e?.message || e);
 
-    final.forEach(r => {
-      L.circleMarker([r.lat,r.lon], { radius:8, color:"green", fillOpacity:0.9 })
-        .addTo(layer)
-        .bindPopup(`<b>${r.title}</b><br>${Math.round(r.maxPower)} kW<br>${r.dist.toFixed(1)} km`);
+      dbg("OCM primary failed:", msg, "status:", status || "");
 
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `
-        <b>${r.title}</b>
-        <div class="meta">
-          <span class="pill">${Math.round(r.maxPower)} kW</span>
-          <span class="pill">${r.dist.toFixed(1)} km</span>
-        </div>
-        <button class="primary" style="margin-top:8px;">Navigoi</button>
-      `;
-      card.querySelector("button").onclick = () =>
-        window.open(`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}`, "_blank");
-      elList.appendChild(card);
-    });
+      if (status === 524 || status === 503 || status === 504 || msg.toLowerCase().includes("timeout")) {
+        setStatus("OCM ruuhkassa – kokeillaan pienemmällä haulla…", "warn");
+        const smaller = Math.max(10, Math.round(radiusKm * 0.6));
+        pois = await fetchOCM(target.lat, target.lon, smaller, 15);
+      } else {
+        throw e;
+      }
+    }
 
-    safeFitBounds();
-    setStatus(`Löytyi ${final.length} sopivaa latauspaikkaa.`);
+    const { final } = mapPoisToResults(pois, target);
+
+    if (!final.length) {
+      setStatus("Ei löytynyt DC-latureita tällä haulla. Kokeile isompaa hakusädettä.", "warn");
+      showFallbackActions(!!loadLast());
+      setBusy(false);
+      return;
+    }
+
+    // tallenna viimeisin onnistunut
+    saveLast({ route, target, usableKm, results: final, savedAt: Date.now() });
+
+    renderResults(final, "");
+    setBusy(false);
+
   } catch (e) {
     console.error(e);
-    dbg("CATCH:", e?.message || String(e));
-    setStatus("Haku epäonnistui: " + (e?.message || String(e)), "error");
+    dbg("CATCH:", e?.message || String(e), "status:", e?.status || "");
+
+    // näytä retry + mahdollinen viimeisin tulos
+    showRetry(true);
+    showFallbackActions(!!loadLast());
+
+    const msg = String(e?.message || e);
+    if (msg.toLowerCase().includes("ocm")) {
+      setStatus("OCM ei vastannut nyt (ruuhka/timeout). Yritä uudelleen hetken päästä.", "error");
+    } else {
+      setStatus("Haku epäonnistui: " + msg, "error");
+    }
+    setBusy(false);
   }
-};
+}
+
+/* ------------------ BUTTONS ------------------ */
+elBtn.onclick = runSearch;
+elBtnRetry.onclick = runSearch;
+
+elBtnShowLast.onclick = () => showLastIfAvailable();
+elBtnClearLast.onclick = () => { clearLast(); setStatus("Viimeisin tulos tyhjennetty.", "warn"); showFallbackActions(false); };
 
 /* init */
 document.addEventListener("DOMContentLoaded", () => {
