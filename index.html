@@ -35,6 +35,9 @@
     .pill input { padding: 4px 6px; border-radius: 8px; }
     #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 220px; overflow:auto; display:none; }
     .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.opchip { border: 1px solid #e5e7eb; }
+.opchip.active { outline: 2px solid #2563eb; }
+.opclear { border: 1px dashed #cbd5e1; }
 
     /* Dev-napit piiloon oletuksena */
     .devonly { display: none !important; }
@@ -68,6 +71,15 @@
     <input id="operatorFilter" class="grow"
       placeholder="Salli operaattorit (pilkuilla), esim. Tesla, Ionity, K-Lataus (tyhjä = kaikki)" />
   </div>
+<div class="row" style="margin-top:8px;">
+  <button type="button" class="ghost opchip" data-op="ABC">ABC</button>
+  <button type="button" class="ghost opchip" data-op="K-Lataus">K-Lataus</button>
+  <button type="button" class="ghost opchip" data-op="Neste">Neste</button>
+  <button type="button" class="ghost opchip" data-op="ST1">ST1</button>
+  <button type="button" class="ghost opchip" data-op="Faast">Faast</button>
+
+  <button type="button" class="ghost opclear" title="Tyhjennä suodatin">Tyhjennä</button>
+</div>
 
   <div id="status" class="small" style="margin-top:8px;"></div>
 
@@ -308,6 +320,74 @@ function operatorMatches(allow, opTitle, stationTitle) {
   const hay = (String(opTitle || "") + " " + String(stationTitle || "")).toLowerCase();
   return allow.some(a => hay.includes(a.toLowerCase()));
 }
+/* ------------------ OPERATOR CHIPS ------------------ */
+function normalizeOp(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
+function getAllowOpsSetFromInput() {
+  const allow = parseOperatorAllowlist();
+  return new Set(allow.map(normalizeOp));
+}
+
+function setInputFromAllowOpsSet(set) {
+  // Palautetaan “siistissä muodossa” napit ensin (ABC, K-Lataus jne)
+  // Käytetään alkuperäisiä display-nimiä nappien data-op arvoista.
+  const chips = Array.from(document.querySelectorAll(".opchip"));
+  const ordered = [];
+
+  chips.forEach(btn => {
+    const label = btn.getAttribute("data-op") || "";
+    if (set.has(normalizeOp(label))) ordered.push(label);
+  });
+
+  // Jos käyttäjä on kirjoittanut jotain muuta käsin, se jää settiin,
+  // mutta ei löydy chips-listasta → lisätään loppuun.
+  const known = new Set(ordered.map(normalizeOp));
+  Array.from(set).forEach(n => {
+    if (!known.has(n) && n) ordered.push(n); // lisätään normalisoitu “n”
+  });
+
+  elOperatorFilter.value = ordered.join(", ");
+}
+
+function refreshChipUIFromInput() {
+  const set = getAllowOpsSetFromInput();
+  document.querySelectorAll(".opchip").forEach(btn => {
+    const label = btn.getAttribute("data-op") || "";
+    const on = set.has(normalizeOp(label));
+    btn.classList.toggle("active", on);
+  });
+}
+
+function toggleOperator(label) {
+  const set = getAllowOpsSetFromInput();
+  const key = normalizeOp(label);
+  if (set.has(key)) set.delete(key);
+  else set.add(key);
+
+  setInputFromAllowOpsSet(set);
+  refreshChipUIFromInput();
+}
+
+function clearOperators() {
+  elOperatorFilter.value = "";
+  refreshChipUIFromInput();
+}
+
+// Kytke napit
+document.querySelectorAll(".opchip").forEach(btn => {
+  btn.addEventListener("click", () => {
+    toggleOperator(btn.getAttribute("data-op"));
+  });
+});
+
+document.querySelectorAll(".opclear").forEach(btn => {
+  btn.addEventListener("click", () => clearOperators());
+});
+
+// Jos käyttäjä kirjoittaa käsin, pidä nappien tila mukana
+elOperatorFilter.addEventListener("input", () => refreshChipUIFromInput());
 
 /* ------------------ RESULTS ------------------ */
 function clearUIForSearch() {
