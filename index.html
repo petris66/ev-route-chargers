@@ -4,17 +4,20 @@
   <meta charset="utf-8" />
   <title>EV Route – Seuraava lataus</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+
+  <!-- PWA -->
+  <link rel="manifest" href="/ev-route-chargers/manifest.webmanifest">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="EV Route">
+  <link rel="apple-touch-icon" href="/ev-route-chargers/icons/icon-192.png">
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<link rel="manifest" href="/ev-route-chargers/manifest.webmanifest">
-<meta name="theme-color" content="#2563eb">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="EV Route">
-<link rel="apple-touch-icon" href="/ev-route-chargers/icons/icon-192.png">
 
   <style>
     html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    #map { height: 45vh; height: 45svh; height: 45dvh; min-height: 260px; width: 100%; }
+    #map { height: 45vh; height: 45svh; height: 45dvh; min-height: 260px; width: 100%; display:block; }
     main { padding: 10px; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .grow { flex: 1; min-width: 210px; }
@@ -32,20 +35,13 @@
     .pill input { padding: 4px 6px; border-radius: 8px; }
     #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 220px; overflow:auto; display:none; }
     .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+
     /* Dev-napit piiloon oletuksena */
-.devonly { display: none !important; }
-
-/* Näytä dev-napit vain debug-tilassa */
-.debug-on .devonly { display: inline-block !important; }
-
+    .devonly { display: none !important; }
+    /* Näytä dev-napit vain debug-tilassa */
+    .debug-on .devonly { display: inline-block !important; }
   </style>
 </head>
-  <script>
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/ev-route-chargers/sw.js").catch(console.error);
-  }
-</script>
-
 <body>
 
 <div id="map"></div>
@@ -63,15 +59,15 @@
 
     <button id="btnFind" class="primary">Etsi seuraava lataus</button>
     <button id="btnRetry" class="ghost" style="display:none;">Yritä uudelleen</button>
-    <button id="btnHardReload" class="ghost devonly" title="Jos iPhone näyttää vanhaa versiota">Päivitä “kovaa”</button>
-<button id="btnDebug" class="ghost devonly">Debug</button>
 
+    <button id="btnHardReload" class="ghost devonly" title="Jos iPhone näyttää vanhaa versiota">Päivitä “kovaa”</button>
+    <button id="btnDebug" class="ghost devonly">Debug</button>
   </div>
 
   <div class="row" style="margin-top:8px;">
-  <input id="operatorFilter" class="grow" placeholder="Salli operaattorit (pilkuilla), esim. Tesla, Ionity, K-Lataus (tyhjä = kaikki)" />
-</div>
-
+    <input id="operatorFilter" class="grow"
+      placeholder="Salli operaattorit (pilkuilla), esim. Tesla, Ionity, K-Lataus (tyhjä = kaikki)" />
+  </div>
 
   <div id="status" class="small" style="margin-top:8px;"></div>
 
@@ -89,13 +85,10 @@
 /* ------------------ CONFIG ------------------ */
 const OCM_PROXY_BASE = "https://ev-route-chargers.vercel.app/api/ocm";
 const LAST_KEY = "ev_route_last_success_v2";
-  const DEBUG_MODE = false; // true = debug-napit + loki näkyviin
+
 // Debug päälle vain jos URL:ssa on ?debug=1
 const DEBUG_MODE = new URLSearchParams(location.search).get("debug") === "1";
-
-// Lisätään luokka dokumenttiin, jolloin CSS voi näyttää/piilottaa dev-UI:n
 if (DEBUG_MODE) document.documentElement.classList.add("debug-on");
-
 
 /* ------------------ DEBUG ------------------ */
 const elDebug = document.getElementById("debug");
@@ -110,38 +103,20 @@ function dbg(...args) {
   elDebug.textContent += line + "\n";
   elDebug.scrollTop = elDebug.scrollHeight;
 }
-
-
 window.addEventListener("error", (e) => dbg("JS ERROR:", e.message));
 window.addEventListener("unhandledrejection", (e) => dbg("PROMISE ERROR:", String(e.reason)));
 
-/* Top-10 POI debug */
 function debugTopPOIs(pois) {
-  if (!Array.isArray(pois)) {
-    dbg("DEBUG POI: pois is not an array");
-    return;
-  }
+  if (!Array.isArray(pois)) { dbg("DEBUG POI: pois is not an array"); return; }
   dbg("DEBUG POI: total returned =", String(pois.length));
-
   pois.slice(0, 10).forEach((p, i) => {
     const title = p?.AddressInfo?.Title || "(no title)";
     const operator = p?.OperatorInfo?.Title || "(unknown operator)";
     const conns = p?.Connections || [];
-
-    const isDC = conns.some(c =>
-      Number(c?.LevelID) === 3 ||
-      String(c?.CurrentType?.Title || "").toUpperCase().includes("DC")
-    );
-
+    const isDC = conns.some(c => Number(c?.LevelID) === 3 || String(c?.CurrentType?.Title || "").toUpperCase().includes("DC"));
     let maxPower = Math.max(...conns.map(c => Number(c?.PowerKW) || 0), 0);
-    if (isDC && (!maxPower || maxPower <= 0)) maxPower = 50; // fallback (DC mutta PowerKW puuttuu)
-
-    dbg(
-      `#${i+1}`, "|", title,
-      "| operator:", operator,
-      "| maxPower:", String(maxPower),
-      "| DC:", String(isDC)
-    );
+    if (isDC && (!maxPower || maxPower <= 0)) maxPower = 50;
+    dbg(`#${i+1}`, "|", title, "| operator:", operator, "| maxPower:", String(maxPower), "| DC:", String(isDC));
   });
 }
 
@@ -174,21 +149,32 @@ function setBusy(isBusy) {
   elBtn.disabled = isBusy;
   elBtnRetry.disabled = isBusy;
 }
+function showRetry(show) { elBtnRetry.style.display = show ? "inline-block" : "none"; }
+function showFallbackActions(show) { elFallbackActions.style.display = show ? "flex" : "none"; }
+
 elBtnDebug.onclick = () => {
+  if (!DEBUG_MODE) return;
   elDebug.style.display = (elDebug.style.display === "block") ? "none" : "block";
   dbg("Debug toggled");
 };
+
 elBtnHardReload.onclick = () => {
   const u = new URL(location.href);
   u.searchParams.set("v", String(Date.now()));
   location.replace(u.toString());
 };
-function showRetry(show) { elBtnRetry.style.display = show ? "inline-block" : "none"; }
-function showFallbackActions(show) { elFallbackActions.style.display = show ? "flex" : "none"; }
 
 /* ------------------ MAP ------------------ */
 let map, layer;
+
 function initMap() {
+  const mapEl = document.getElementById("map");
+  if (!mapEl) {
+    dbg("MAP ERROR: #map element not found");
+    return;
+  }
+  dbg("MAP element size:", mapEl.clientWidth + "x" + mapEl.clientHeight);
+
   map = L.map('map').setView([60.1699, 24.9384], 6);
   const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 18,
@@ -196,8 +182,13 @@ function initMap() {
   }).addTo(map);
   tiles.on('tileerror', () => dbg("TILE ERROR"));
   layer = L.layerGroup().addTo(map);
-  setTimeout(() => { try { map.invalidateSize(); dbg("invalidateSize OK"); } catch(e) {} }, 300);
+
+  setTimeout(() => {
+    try { map.invalidateSize(); dbg("invalidateSize OK"); }
+    catch (e) { dbg("invalidateSize ERR", e?.message || String(e)); }
+  }, 350);
 }
+
 function safeFitBounds() {
   try {
     const bounds = layer.getBounds?.();
@@ -213,6 +204,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
+
 async function geocode(name) {
   const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(name);
   const r = await fetch(url);
@@ -220,6 +212,7 @@ async function geocode(name) {
   if (!j[0]) return null;
   return { lat: +j[0].lat, lon: +j[0].lon };
 }
+
 async function getStart() {
   return new Promise(resolve => {
     if (!navigator.geolocation) return resolve(null);
@@ -230,12 +223,14 @@ async function getStart() {
     );
   });
 }
+
 async function fetchRoute(start, end) {
   const url = `https://router.project-osrm.org/route/v1/driving/${start.lon},${start.lat};${end.lon},${end.lat}?overview=full&geometries=geojson`;
   const r = await fetch(url);
   const j = await r.json();
   return j.routes[0].geometry.coordinates;
 }
+
 function pointAlongRoute(coords, km) {
   let acc = 0;
   for (let i=1;i<coords.length;i++) {
@@ -250,6 +245,7 @@ function pointAlongRoute(coords, km) {
   const last = coords.at(-1);
   return { lat:last[1], lon:last[0] };
 }
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function fetchJsonWithTimeout(url, timeoutMs) {
@@ -261,19 +257,11 @@ async function fetchJsonWithTimeout(url, timeoutMs) {
 
     const s = text.trim().toLowerCase();
     const looksHtml = s.startsWith("<!doctype html") || s.startsWith("<html");
-    if (looksHtml) {
-      const err = new Error("OCM returned HTML (likely 524 timeout)");
-      err.status = 524;
-      throw err;
-    }
+    if (looksHtml) { const err = new Error("OCM returned HTML (likely 524 timeout)"); err.status = 524; throw err; }
 
     let json;
     try { json = JSON.parse(text); }
-    catch {
-      const err = new Error("Invalid JSON from proxy");
-      err.status = r.status;
-      throw err;
-    }
+    catch { const err = new Error("Invalid JSON from proxy"); err.status = r.status; throw err; }
 
     if (!r.ok) {
       const msg = json?.error || ("HTTP " + r.status);
@@ -282,11 +270,8 @@ async function fetchJsonWithTimeout(url, timeoutMs) {
       err.json = json;
       throw err;
     }
-
     return json;
-  } finally {
-    clearTimeout(t);
-  }
+  } finally { clearTimeout(t); }
 }
 
 async function fetchOCM(lat, lon, km, maxresults = 25) {
@@ -314,7 +299,7 @@ async function fetchOCM(lat, lon, km, maxresults = 25) {
 
 /* ------------------ OPERATOR FILTER ------------------ */
 function parseOperatorAllowlist() {
-  const raw = (elOperatorFilter.value || "").trim();
+  const raw = (elOperatorFilter?.value || "").trim();
   if (!raw) return [];
   return raw.split(",").map(s => s.trim()).filter(Boolean);
 }
@@ -331,6 +316,7 @@ function clearUIForSearch() {
   showRetry(false);
   showFallbackActions(false);
 }
+
 function renderResults(final, suffix = "") {
   elList.innerHTML = "";
   final.forEach(r => {
@@ -369,9 +355,7 @@ function mapPoisToResults(pois, target, allowOps) {
     );
 
     let maxPower = Math.max(...conns.map(c => Number(c.PowerKW) || 0), 0);
-    if (isDC && (!maxPower || maxPower <= 0)) {
-      maxPower = 50; // fallback (voit muuttaa esim 100)
-    }
+    if (isDC && (!maxPower || maxPower <= 0)) maxPower = 50;
 
     const operator = p.OperatorInfo?.Title || "";
     return {
@@ -386,7 +370,6 @@ function mapPoisToResults(pois, target, allowOps) {
   }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.isDC);
 
   const filteredByOp = mapped.filter(x => operatorMatches(allowOps, x.operator, x.title));
-
   const fast = filteredByOp.filter(x => x.maxPower >= 150);
   const final = (fast.length ? fast : filteredByOp)
     .sort((a,b)=>(b.maxPower-a.maxPower)||(a.dist-b.dist))
@@ -529,18 +512,17 @@ document.getElementById('btnRetry').onclick = runSearch;
 elBtnShowLast.onclick = () => showLastIfAvailable();
 elBtnClearLast.onclick = () => { clearLast(); setStatus("Viimeisin tulos tyhjennetty.", "warn"); showFallbackActions(false); };
 
+/* init */
 document.addEventListener("DOMContentLoaded", () => {
   initMap();
   setStatus("Valmis. Syötä määränpää ja hae seuraava lataus." + (DEBUG_MODE ? " (Debug mode ON)" : ""));
-
 });
 </script>
-  <script>
+
+<!-- PWA SW register -->
+<script>
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker
-      .register("/ev-route-chargers/sw.js")
-      .then(() => console.log("SW registered"))
-      .catch(console.error);
+    navigator.serviceWorker.register("/ev-route-chargers/sw.js").catch(()=>{});
   }
 </script>
 
