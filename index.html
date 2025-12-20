@@ -514,5 +514,14 @@ document.addEventListener("DOMContentLoaded", () => {
   setStatus("Valmis. Syötä määränpää ja hae seuraava lataus.");
 });
 </script>
+  <script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker
+      .register("/ev-route-chargers/sw.js")
+      .then(() => console.log("SW registered"))
+      .catch(console.error);
+  }
+</script>
+
 </body>
 </html>
