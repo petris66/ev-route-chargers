@@ -231,7 +231,7 @@ async function fetchOCM(lat, lon, km, maxresults = 25) {
     distance: String(km),
     distanceunit: "KM",
     maxresults: String(maxresults),
-    compact: "true"
+    
   });
   const url = OCM_PROXY_BASE + "?" + p.toString();
   dbg("OCM URL:", url);
