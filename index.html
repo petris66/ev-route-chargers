@@ -254,11 +254,12 @@ function parseOperatorAllowlist() {
   if (!raw) return [];
   return raw.split(",").map(s => s.trim()).filter(Boolean);
 }
-function operatorMatches(allow, opTitle) {
+function operatorMatches(allow, opTitle, stationTitle) {
   if (!allow.length) return true;
-  const t = String(opTitle || "").toLowerCase();
-  return allow.some(a => t.includes(a.toLowerCase()));
+  const hay = (String(opTitle || "") + " " + String(stationTitle || "")).toLowerCase();
+  return allow.some(a => hay.includes(a.toLowerCase()));
 }
+
 
 /* ------------------ RESULTS ------------------ */
 function clearUIForSearch() {
@@ -312,7 +313,8 @@ function mapPoisToResults(pois, target, allowOps) {
     };
   }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.isDC);
 
-  const filteredByOp = mapped.filter(x => operatorMatches(allowOps, x.operator));
+ const filteredByOp = mapped.filter(x => operatorMatches(allowOps, x.operator, x.title));
+
 
   const fast = filteredByOp.filter(x => x.maxPower >= 150);
   const final = (fast.length ? fast : filteredByOp)
