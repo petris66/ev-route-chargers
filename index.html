@@ -67,69 +67,64 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 /* ------------------ CONFIG ------------------ */
-var OCM_PROXY_BASE = "https://ev-route-chargers.vercel.app/api/ocm";
-var LAST_KEY = "ev_route_last_success_v3";
+const OCM_PROXY_BASE = "https://ev-route-chargers.vercel.app/api/ocm";
+const LAST_KEY = "ev_route_last_success_v2";
 
 /* ------------------ DEBUG ------------------ */
-var elDebug = document.getElementById("debug");
-function dbg() {
-  var args = Array.prototype.slice.call(arguments);
-  var line = args.map(function(a){
+const elDebug = document.getElementById("debug");
+function dbg(...args) {
+  const line = args.map(a => {
     if (typeof a === "string") return a;
-    try { return JSON.stringify(a); } catch (e) { return String(a); }
+    try { return JSON.stringify(a); } catch { return String(a); }
   }).join(" ");
   elDebug.textContent += line + "\n";
   elDebug.scrollTop = elDebug.scrollHeight;
 }
-dbg("SCRIPT LOADED");
-window.addEventListener("error", function(e){ dbg("JS ERROR:", e.message); });
-window.addEventListener("unhandledrejection", function(e){ dbg("PROMISE ERROR:", String(e.reason)); });
+window.addEventListener("error", (e) => dbg("JS ERROR:", e.message));
+window.addEventListener("unhandledrejection", (e) => dbg("PROMISE ERROR:", String(e.reason)));
 
+/* --- NEW: Top10 debug listing --- */
 function debugTopPOIs(pois) {
-  if (!Array.isArray(pois)) { dbg("DEBUG POI: pois is not an array"); return; }
+  if (!Array.isArray(pois)) {
+    dbg("DEBUG POI: pois is not an array");
+    return;
+  }
   dbg("DEBUG POI: total returned =", String(pois.length));
-  pois.slice(0,10).forEach(function(p, i){
-    var title = (p.AddressInfo && p.AddressInfo.Title) ? p.AddressInfo.Title : "(no title)";
-    var operator = (p.OperatorInfo && p.OperatorInfo.Title) ? p.OperatorInfo.Title : "(no operator)";
-    var conns = p.Connections || [];
-    var maxPower = 0;
-    for (var k=0;k<conns.length;k++) {
-      var pw = Number(conns[k].PowerKW) || 0;
-      if (pw > maxPower) maxPower = pw;
-    }
-    var isDC = false;
-    for (var j=0;j<conns.length;j++) {
-      var c = conns[j] || {};
-      var lvl = Number(c.LevelID);
-      var ct = (c.CurrentType && c.CurrentType.Title) ? String(c.CurrentType.Title).toUpperCase() : "";
-      if (lvl === 3 || ct.indexOf("DC") >= 0) { isDC = true; break; }
-    }
-    dbg("#"+String(i+1), "|", title, "| operator:", operator, "| maxPower:", String(maxPower), "| DC:", String(isDC));
+
+  pois.slice(0, 10).forEach((p, i) => {
+    const title = p?.AddressInfo?.Title || "(no title)";
+    const operator = p?.OperatorInfo?.Title || "(no operator)";
+    const conns = p?.Connections || [];
+    const maxPower = Math.max(...conns.map(c => Number(c?.PowerKW) || 0), 0);
+    const isDC = conns.some(c =>
+      Number(c?.LevelID) === 3 ||
+      String(c?.CurrentType?.Title || "").toUpperCase().includes("DC")
+    );
+    dbg(`#${i+1}`, "|", title, "| operator:", operator, "| maxPower:", String(maxPower), "| DC:", String(isDC));
   });
 }
 
 /* ------------------ UI ------------------ */
-var elFrom = document.getElementById('fromCity');
-var elTo = document.getElementById('toCity');
-var elRange = document.getElementById('rangeKm');
-var elReserve = document.getElementById('reserveKm');
-var elRadius = document.getElementById('radiusKm');
-var elOperatorFilter = document.getElementById('operatorFilter');
+const elFrom = document.getElementById('fromCity');
+const elTo = document.getElementById('toCity');
+const elRange = document.getElementById('rangeKm');
+const elReserve = document.getElementById('reserveKm');
+const elRadius = document.getElementById('radiusKm');
+const elOperatorFilter = document.getElementById('operatorFilter');
 
-var elBtn = document.getElementById('btnFind');
-var elBtnRetry = document.getElementById('btnRetry');
-var elBtnHardReload = document.getElementById('btnHardReload');
-var elBtnDebug = document.getElementById('btnDebug');
+const elBtn = document.getElementById('btnFind');
+const elBtnRetry = document.getElementById('btnRetry');
+const elBtnHardReload = document.getElementById('btnHardReload');
+const elBtnDebug = document.getElementById('btnDebug');
 
-var elStatus = document.getElementById('status');
-var elList = document.getElementById('list');
+const elStatus = document.getElementById('status');
+const elList = document.getElementById('list');
 
-var elFallbackActions = document.getElementById('fallbackActions');
-var elBtnShowLast = document.getElementById('btnShowLast');
-var elBtnClearLast = document.getElementById('btnClearLast');
+const elFallbackActions = document.getElementById('fallbackActions');
+const elBtnShowLast = document.getElementById('btnShowLast');
+const elBtnClearLast = document.getElementById('btnClearLast');
 
-function setStatus(msg, cls) {
-  cls = cls || "";
+function setStatus(msg, cls="") {
   elStatus.className = "small " + cls;
   elStatus.textContent = msg;
   dbg("STATUS:", msg);
@@ -138,132 +133,135 @@ function setBusy(isBusy) {
   elBtn.disabled = isBusy;
   elBtnRetry.disabled = isBusy;
 }
-function showRetry(show) { elBtnRetry.style.display = show ? "inline-block" : "none"; }
-function showFallbackActions(show) { elFallbackActions.style.display = show ? "flex" : "none"; }
-
-elBtnDebug.onclick = function() {
+elBtnDebug.onclick = () => {
   elDebug.style.display = (elDebug.style.display === "block") ? "none" : "block";
   dbg("Debug toggled");
 };
-
-elBtnHardReload.onclick = function() {
-  // cache-buster URL
-  var u = new URL(location.href);
+elBtnHardReload.onclick = () => {
+  const u = new URL(location.href);
   u.searchParams.set("v", String(Date.now()));
-  location.href = u.toString();
+  location.replace(u.toString());
 };
+function showRetry(show) { elBtnRetry.style.display = show ? "inline-block" : "none"; }
+function showFallbackActions(show) { elFallbackActions.style.display = show ? "flex" : "none"; }
 
 /* ------------------ MAP ------------------ */
-var map = null, layer = null;
+let map, layer;
 function initMap() {
   map = L.map('map').setView([60.1699, 24.9384], 6);
-  var tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
-  tiles.on('tileerror', function(){ dbg("TILE ERROR"); });
+  const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
+  tiles.on('tileerror', () => dbg("TILE ERROR"));
   layer = L.layerGroup().addTo(map);
-  setTimeout(function(){ try { map.invalidateSize(); dbg("invalidateSize OK"); } catch(e){} }, 300);
+  setTimeout(() => { try { map.invalidateSize(); dbg("invalidateSize OK"); } catch(e) {} }, 300);
 }
 function safeFitBounds() {
   try {
-    var bounds = layer.getBounds && layer.getBounds();
+    const bounds = layer.getBounds?.();
     if (bounds && bounds.isValid && bounds.isValid()) map.fitBounds(bounds, { padding:[20,20] });
-  } catch (e) { dbg("fitBounds error:", e && e.message ? e.message : String(e)); }
+  } catch (e) { dbg("fitBounds error:", e?.message || String(e)); }
 }
 
 /* ------------------ HELPERS ------------------ */
 function haversineKm(lat1, lon1, lat2, lon2) {
-  var R = 6371;
-  var dLat = (lat2-lat1) * Math.PI/180;
-  var dLon = (lon2-lon1) * Math.PI/180;
-  var a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
+  const R = 6371;
+  const dLat = (lat2-lat1) * Math.PI/180;
+  const dLon = (lon2-lon1) * Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 async function geocode(name) {
-  var url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(name);
-  var r = await fetch(url);
-  var j = await r.json();
+  const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(name);
+  const r = await fetch(url);
+  const j = await r.json();
   if (!j[0]) return null;
   return { lat: +j[0].lat, lon: +j[0].lon };
 }
 async function getStart() {
-  return new Promise(function(resolve){
+  return new Promise(resolve => {
     if (!navigator.geolocation) return resolve(null);
     navigator.geolocation.getCurrentPosition(
-      function(p){ resolve({ lat: p.coords.latitude, lon: p.coords.longitude }); },
-      function(){ resolve(null); },
+      p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      () => resolve(null),
       { enableHighAccuracy: true, timeout: 8000 }
     );
   });
 }
 async function fetchRoute(start, end) {
-  var url = "https://router.project-osrm.org/route/v1/driving/" +
-    String(start.lon) + "," + String(start.lat) + ";" + String(end.lon) + "," + String(end.lat) +
-    "?overview=full&geometries=geojson";
-  var r = await fetch(url);
-  var j = await r.json();
+  const url = `https://router.project-osrm.org/route/v1/driving/${start.lon},${start.lat};${end.lon},${end.lat}?overview=full&geometries=geojson`;
+  const r = await fetch(url);
+  const j = await r.json();
   return j.routes[0].geometry.coordinates;
 }
 function pointAlongRoute(coords, km) {
-  var acc = 0;
-  for (var i=1;i<coords.length;i++) {
-    var a = coords[i-1], b = coords[i];
-    var d = haversineKm(a[1],a[0],b[1],b[0]);
+  let acc = 0;
+  for (let i=1;i<coords.length;i++) {
+    const a = coords[i-1], b = coords[i];
+    const d = haversineKm(a[1],a[0],b[1],b[0]);
     if (acc + d >= km) {
-      var t = (km - acc)/d;
+      const t = (km - acc)/d;
       return { lat: a[1] + (b[1]-a[1])*t, lon: a[0] + (b[0]-a[0])*t };
     }
     acc += d;
   }
-  var last = coords[coords.length-1];
+  const last = coords.at(-1);
   return { lat:last[1], lon:last[0] };
 }
-function sleep(ms) { return new Promise(function(r){ setTimeout(r, ms); }); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function fetchJsonWithTimeout(url, timeoutMs) {
-  var controller = new AbortController();
-  var t = setTimeout(function(){ controller.abort(); }, timeoutMs);
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    var r = await fetch(url, { headers: { "Accept": "application/json" }, cache: "no-store", signal: controller.signal });
-    var text = await r.text();
+    const r = await fetch(url, { headers: { "Accept": "application/json" }, cache: "no-store", signal: controller.signal });
+    const text = await r.text();
 
-    var s = text.trim().toLowerCase();
-    var looksHtml = s.indexOf("<!doctype html") === 0 || s.indexOf("<html") === 0;
-    if (looksHtml) { var err1 = new Error("OCM returned HTML (likely 524 timeout)"); err1.status = 524; throw err1; }
+    const s = text.trim().toLowerCase();
+    const looksHtml = s.startsWith("<!doctype html") || s.startsWith("<html");
+    if (looksHtml) {
+      const err = new Error("OCM returned HTML (likely 524 timeout)");
+      err.status = 524;
+      throw err;
+    }
 
-    var json;
+    let json;
     try { json = JSON.parse(text); }
-    catch (e) { var err2 = new Error("Invalid JSON from proxy"); err2.status = r.status; throw err2; }
+    catch {
+      const err = new Error("Invalid JSON from proxy");
+      err.status = r.status;
+      throw err;
+    }
 
     if (!r.ok) {
-      var msg = (json && json.error) ? json.error : ("HTTP " + String(r.status));
-      var err3 = new Error(msg);
-      err3.status = r.status;
-      err3.json = json;
-      throw err3;
+      const msg = json?.error || ("HTTP " + r.status);
+      const err = new Error(msg);
+      err.status = r.status;
+      err.json = json;
+      throw err;
     }
+
     return json;
   } finally {
     clearTimeout(t);
   }
 }
 
-async function fetchOCM(lat, lon, km, maxresults) {
-  maxresults = maxresults || 25;
-  var p = new URLSearchParams({
+async function fetchOCM(lat, lon, km, maxresults = 25) {
+  const p = new URLSearchParams({
     latitude: String(lat),
     longitude: String(lon),
     distance: String(km),
     distanceunit: "KM",
     maxresults: String(maxresults)
   });
-  var url = OCM_PROXY_BASE + "?" + p.toString();
+  const url = OCM_PROXY_BASE + "?" + p.toString();
   dbg("OCM URL:", url);
 
-  var lastErr = null;
-  for (var i = 1; i <= 3; i++) {
+  let lastErr = null;
+  for (let i = 1; i <= 3; i++) {
     try { return await fetchJsonWithTimeout(url, 18000); }
     catch (e) {
       lastErr = e;
-      dbg("OCM try failed:", String(e && e.message ? e.message : e), "status:", String(e && e.status ? e.status : ""));
+      dbg("OCM try failed:", String(e?.message || e), "status:", e?.status || "");
       if (i < 3) await sleep(500 * i);
     }
   }
@@ -272,14 +270,14 @@ async function fetchOCM(lat, lon, km, maxresults) {
 
 /* ------------------ OPERATOR FILTER ------------------ */
 function parseOperatorAllowlist() {
-  var raw = String(elOperatorFilter.value || "").trim();
+  const raw = (elOperatorFilter.value || "").trim();
   if (!raw) return [];
-  return raw.split(",").map(function(s){ return s.trim(); }).filter(Boolean);
+  return raw.split(",").map(s => s.trim()).filter(Boolean);
 }
 function operatorMatches(allow, opTitle, stationTitle) {
   if (!allow.length) return true;
-  var hay = (String(opTitle || "") + " " + String(stationTitle || "")).toLowerCase();
-  return allow.some(function(a){ return hay.indexOf(a.toLowerCase()) >= 0; });
+  const hay = (String(opTitle || "") + " " + String(stationTitle || "")).toLowerCase();
+  return allow.some(a => hay.includes(a.toLowerCase()));
 }
 
 /* ------------------ RESULTS ------------------ */
@@ -289,87 +287,68 @@ function clearUIForSearch() {
   showRetry(false);
   showFallbackActions(false);
 }
-function renderResults(final, suffix) {
-  suffix = suffix || "";
+function renderResults(final, suffix = "") {
   elList.innerHTML = "";
-  final.forEach(function(r){
+  final.forEach(r => {
     L.circleMarker([r.lat,r.lon], { radius:8, color:"green", fillOpacity:0.9 })
       .addTo(layer)
-      .bindPopup("<b>"+r.title+"</b><br>"+Math.round(r.maxPower)+" kW<br>"+r.dist.toFixed(1)+" km<br>"+(r.operator ? ("<i>"+r.operator+"</i>") : ""));
+      .bindPopup(`<b>${r.title}</b><br>${Math.round(r.maxPower)} kW<br>${r.dist.toFixed(1)} km<br>${r.operator ? ("<i>"+r.operator+"</i>") : ""}`);
 
-    var card = document.createElement("div");
+    const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML =
-      "<b>"+r.title+"</b>" +
-      "<div class='meta'>" +
-        "<span class='pill'>"+Math.round(r.maxPower)+" kW</span>" +
-        "<span class='pill'>"+r.dist.toFixed(1)+" km</span>" +
-        (r.operator ? "<span class='pill'>"+r.operator+"</span>" : "") +
-      "</div>" +
-      "<button class='primary' style='margin-top:8px;'>Navigoi</button>";
-
-    card.querySelector("button").onclick = function() {
-      window.open("https://www.google.com/maps/dir/?api=1&destination=" + r.lat + "," + r.lon, "_blank");
-    };
+    card.innerHTML = `
+      <b>${r.title}</b>
+      <div class="meta">
+        <span class="pill">${Math.round(r.maxPower)} kW</span>
+        <span class="pill">${r.dist.toFixed(1)} km</span>
+        ${r.operator ? `<span class="pill">${r.operator}</span>` : ``}
+      </div>
+      <button class="primary" style="margin-top:8px;">Navigoi</button>
+    `;
+    card.querySelector("button").onclick = () =>
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}`, "_blank");
     elList.appendChild(card);
   });
 
   safeFitBounds();
-  setStatus("Löytyi " + String(final.length) + " latauspaikkaa." + suffix);
+  setStatus(`Löytyi ${final.length} latauspaikkaa.${suffix}`);
 }
 
 function mapPoisToResults(pois, target, allowOps) {
-  var mapped = (pois || []).map(function(p){
-    var ai = p.AddressInfo || {};
-    var conns = p.Connections || [];
-    var maxPower = 0;
-    for (var i=0;i<conns.length;i++) {
-      var pw = Number(conns[i].PowerKW) || 0;
-      if (pw > maxPower) maxPower = pw;
-    }
-    var isDC = false;
-    for (var j=0;j<conns.length;j++) {
-      var c = conns[j] || {};
-      var lvl = Number(c.LevelID);
-      var ct = (c.CurrentType && c.CurrentType.Title) ? String(c.CurrentType.Title).toUpperCase() : "";
-      if (lvl === 3 || ct.indexOf("DC") >= 0) { isDC = true; break; }
-    }
-    var operator = (p.OperatorInfo && p.OperatorInfo.Title) ? p.OperatorInfo.Title : "";
-    var lat = Number(ai.Latitude);
-    var lon = Number(ai.Longitude);
-
+  const mapped = (pois || []).map(p => {
+    const ai = p.AddressInfo || {};
+    const conns = p.Connections || [];
+    const maxPower = Math.max(...conns.map(c => Number(c.PowerKW) || 0), 0);
+    const isDC = conns.some(c => Number(c.LevelID) === 3 || (c.CurrentType?.Title || "").toUpperCase().includes("DC"));
+    const operator = p.OperatorInfo?.Title || "";
     return {
       title: ai.Title || "Nimetön latauspaikka",
-      lat: lat,
-      lon: lon,
-      maxPower: maxPower,
-      isDC: isDC,
-      operator: operator,
-      dist: haversineKm(target.lat, target.lon, lat, lon)
+      lat: Number(ai.Latitude),
+      lon: Number(ai.Longitude),
+      maxPower,
+      isDC,
+      operator,
+      dist: haversineKm(target.lat, target.lon, Number(ai.Latitude), Number(ai.Longitude))
     };
-  }).filter(function(x){ return Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.isDC; });
+  }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.isDC);
 
-  var filteredByOp = mapped.filter(function(x){ return operatorMatches(allowOps, x.operator, x.title); });
+  const filteredByOp = mapped.filter(x => operatorMatches(allowOps, x.operator, x.title));
 
-  var fast = filteredByOp.filter(function(x){ return x.maxPower >= 150; });
-  var base = fast.length ? fast : filteredByOp;
+  const fast = filteredByOp.filter(x => x.maxPower >= 150);
+  const final = (fast.length ? fast : filteredByOp)
+    .sort((a,b)=>(b.maxPower-a.maxPower)||(a.dist-b.dist))
+    .slice(0,5);
 
-  base.sort(function(a,b){
-    if (b.maxPower !== a.maxPower) return b.maxPower - a.maxPower;
-    return a.dist - b.dist;
-  });
-
-  var final = base.slice(0,5);
-  return { mapped: mapped, filteredByOp: filteredByOp, fastCount: fast.length, final: final };
+  return { mapped, filteredByOp, fastCount: fast.length, final };
 }
 
 /* ------------------ LAST SUCCESS ------------------ */
-function saveLast(payload) { try { localStorage.setItem(LAST_KEY, JSON.stringify(payload)); } catch(e){} }
-function loadLast() { try { var s = localStorage.getItem(LAST_KEY); return s ? JSON.parse(s) : null; } catch(e){ return null; } }
-function clearLast() { try { localStorage.removeItem(LAST_KEY); } catch(e){} }
+function saveLast(payload) { try { localStorage.setItem(LAST_KEY, JSON.stringify(payload)); } catch {} }
+function loadLast() { try { const s = localStorage.getItem(LAST_KEY); return s ? JSON.parse(s) : null; } catch { return null; } }
+function clearLast() { try { localStorage.removeItem(LAST_KEY); } catch {} }
 
 function showLastIfAvailable() {
-  var last = loadLast();
+  const last = loadLast();
   if (!last) return setStatus("Ei tallennettua aiempaa tulosta.", "warn");
 
   layer.clearLayers();
@@ -377,7 +356,7 @@ function showLastIfAvailable() {
 
   if (last.route) L.geoJSON({ type:"LineString", coordinates: last.route }, { color:"#2563eb", weight:4 }).addTo(layer);
   if (last.target) L.circleMarker([last.target.lat, last.target.lon], { radius:8, color:"#f59e0b", fillOpacity:0.9 })
-    .addTo(layer).bindPopup("<b>Seuraava lataus</b><br>" + (last.usableKm ? String(Math.round(last.usableKm)) : "") + " km");
+    .addTo(layer).bindPopup(`<b>Seuraava lataus</b><br>${last.usableKm?.toFixed?.(0) ?? ""} km`);
 
   if (last.results) renderResults(last.results, " (viimeisin onnistunut)");
   else setStatus("Tallennettu tulos oli puutteellinen.", "warn");
@@ -388,55 +367,55 @@ async function runSearch() {
   clearUIForSearch();
   setBusy(true);
 
-  var toName = String(elTo.value || "").trim();
+  const toName = elTo.value.trim();
   if (!toName) { setBusy(false); return setStatus("Anna määränpää.", "warn"); }
 
-  var usableKm = Math.max(0, Number(elRange.value) - Number(elReserve.value));
+  const usableKm = Math.max(0, Number(elRange.value) - Number(elReserve.value));
   if (usableKm <= 0) { setBusy(false); return setStatus("Akkua − vara = 0 km. Pienennä varaa tai nosta akkua.", "warn"); }
 
   try {
     setStatus("Haetaan lähtö ja määränpää…");
 
-    var start = await getStart();
+    let start = await getStart();
     if (!start) {
-      var fromName = String(elFrom.value || "").trim();
+      const fromName = elFrom.value.trim();
       if (!fromName) { setBusy(false); return setStatus("GPS ei käytettävissä – anna lähtökaupunki.", "warn"); }
       start = await geocode(fromName);
       if (!start) { setBusy(false); return setStatus("Lähtöpaikkaa ei löytynyt. Tarkista kirjoitusasu.", "warn"); }
     }
 
-    var end = await geocode(toName);
+    const end = await geocode(toName);
     if (!end) { setBusy(false); return setStatus("Määränpäätä ei löytynyt. Tarkista kirjoitusasu (esim. Turku).", "warn"); }
 
     setStatus("Haetaan reitti…");
-    var route = await fetchRoute(start, end);
+    const route = await fetchRoute(start, end);
 
     L.geoJSON({ type:"LineString", coordinates: route }, { color:"#2563eb", weight:4 }).addTo(layer);
 
-    var target = pointAlongRoute(route, usableKm);
+    const target = pointAlongRoute(route, usableKm);
     L.circleMarker([target.lat, target.lon], { radius:8, color:"#f59e0b", fillOpacity:0.9 })
-      .addTo(layer).bindPopup("<b>Seuraava lataus</b><br>" + String(Math.round(usableKm)) + " km");
+      .addTo(layer).bindPopup(`<b>Seuraava lataus</b><br>${usableKm.toFixed(0)} km`);
 
-    setTimeout(function(){ try { map.invalidateSize(); } catch(e){} }, 50);
+    setTimeout(() => map.invalidateSize(), 50);
     safeFitBounds();
 
     setStatus("Haetaan latauspisteet…");
 
-    var allowOps = parseOperatorAllowlist();
-    var radiusKm = Number(elRadius.value);
+    const allowOps = parseOperatorAllowlist();
+    const radiusKm = Number(elRadius.value);
 
-    var pois;
+    let pois;
     try {
       pois = await fetchOCM(target.lat, target.lon, radiusKm, 25);
       debugTopPOIs(pois);
     } catch (e) {
-      var status = e && e.status ? e.status : null;
-      var msg = String(e && e.message ? e.message : e);
-      dbg("OCM primary failed:", msg, "status:", String(status || ""));
+      const status = e?.status;
+      const msg = String(e?.message || e);
+      dbg("OCM primary failed:", msg, "status:", status || "");
 
-      if (status === 524 || status === 503 || status === 504 || msg.toLowerCase().indexOf("timeout") >= 0) {
+      if (status === 524 || status === 503 || status === 504 || msg.toLowerCase().includes("timeout")) {
         setStatus("OCM ruuhkassa – kokeillaan pienemmällä haulla…", "warn");
-        var smaller = Math.max(10, Math.round(radiusKm * 0.6));
+        const smaller = Math.max(10, Math.round(radiusKm * 0.6));
         pois = await fetchOCM(target.lat, target.lon, smaller, 15);
         debugTopPOIs(pois);
       } else {
@@ -444,8 +423,7 @@ async function runSearch() {
       }
     }
 
-    var r = mapPoisToResults(pois, target, allowOps);
-    var mapped = r.mapped, filteredByOp = r.filteredByOp, fastCount = r.fastCount, final = r.final;
+    const { mapped, filteredByOp, fastCount, final } = mapPoisToResults(pois, target, allowOps);
 
     if (!mapped.length) {
       setBusy(false);
@@ -468,37 +446,38 @@ async function runSearch() {
       return;
     }
 
-    saveLast({ route: route, target: target, usableKm: usableKm, results: final, savedAt: Date.now() });
+    saveLast({ route, target, usableKm, results: final, savedAt: Date.now() });
 
-    var suffix = "";
-    if (final.length < 5) suffix += " (näytetään " + String(final.length) + "/5 – kokeile isompaa hakusädettä)";
-    if (!fastCount) suffix += " (ei ≥150 kW osumia – näytetään parhaat DC-laturit)";
+    const suffix =
+      (final.length < 5 ? ` (näytetään ${final.length}/5 – kokeile isompaa hakusädettä)` : "") +
+      (fastCount ? "" : " (ei ≥150 kW osumia – näytetään parhaat DC-laturit)");
 
     renderResults(final, suffix);
     setBusy(false);
 
   } catch (e) {
-    dbg("CATCH:", String(e && e.message ? e.message : e), "status:", String(e && e.status ? e.status : ""));
+    console.error(e);
+    dbg("CATCH:", e?.message || String(e), "status:", e?.status || "");
     showRetry(true);
     showFallbackActions(!!loadLast());
 
-    var msg2 = String(e && e.message ? e.message : e);
-    if (msg2.toLowerCase().indexOf("ocm") >= 0) setStatus("OCM ei vastannut nyt (ruuhka/timeout). Yritä uudelleen hetken päästä.", "error");
-    else setStatus("Haku epäonnistui: " + msg2, "error");
+    const msg = String(e?.message || e);
+    if (msg.toLowerCase().includes("ocm")) setStatus("OCM ei vastannut nyt (ruuhka/timeout). Yritä uudelleen hetken päästä.", "error");
+    else setStatus("Haku epäonnistui: " + msg, "error");
 
     setBusy(false);
   }
 }
 
 /* ------------------ BUTTONS ------------------ */
-elBtn.onclick = runSearch;
-elBtnRetry.onclick = runSearch;
+document.getElementById('btnFind').onclick = runSearch;
+document.getElementById('btnRetry').onclick = runSearch;
 
-elBtnShowLast.onclick = function(){ showLastIfAvailable(); };
-elBtnClearLast.onclick = function(){ clearLast(); setStatus("Viimeisin tulos tyhjennetty.", "warn"); showFallbackActions(false); };
+elBtnShowLast.onclick = () => showLastIfAvailable();
+elBtnClearLast.onclick = () => { clearLast(); setStatus("Viimeisin tulos tyhjennetty.", "warn"); showFallbackActions(false); };
 
-document.addEventListener("DOMContentLoaded", function(){
-  try { initMap(); } catch (e) { dbg("MAP INIT ERROR:", String(e)); }
+document.addEventListener("DOMContentLoaded", () => {
+  initMap();
   setStatus("Valmis. Syötä määränpää ja hae seuraava lataus.");
 });
 </script>
