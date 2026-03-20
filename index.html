@@ -99,9 +99,19 @@
 const OCM_PROXY_BASE = "https://ev-route-chargers.vercel.app/api/ocm";
 const LAST_KEY = "ev_route_last_success_v2";
 
-// Debug päälle vain jos URL:ssa on ?debug=1
-const DEBUG_MODE = new URLSearchParams(location.search).get("debug") === "1";
-if (DEBUG_MODE) document.documentElement.classList.add("debug-on");
+// Debug päälle URL:lla (?debug=1) TAI localStorage (iPhone/PWA)
+let DEBUG_MODE = new URLSearchParams(location.search).get("debug") === "1";
+
+// iPhone / PWA fallback (muistaa debug-tilan)
+if (!DEBUG_MODE && localStorage.getItem("ev_debug") === "1") {
+  DEBUG_MODE = true;
+}
+
+// jos debug aktivoitu URL:lla → tallennetaan se
+if (DEBUG_MODE) {
+  localStorage.setItem("ev_debug", "1");
+  document.documentElement.classList.add("debug-on");
+}
 
 /* ------------------ DEBUG ------------------ */
 const elDebug = document.getElementById("debug");
