@@ -176,9 +176,15 @@ function showRetry(show) { elBtnRetry.style.display = show ? "inline-block" : "n
 function showFallbackActions(show) { elFallbackActions.style.display = show ? "flex" : "none"; }
 
 elBtnDebug.onclick = () => {
-  if (!DEBUG_MODE) return;
-  elDebug.style.display = (elDebug.style.display === "block") ? "none" : "block";
-  dbg("Debug toggled");
+  const enabled = localStorage.getItem("ev_debug") === "1";
+
+  if (enabled) {
+    localStorage.setItem("ev_debug", "0");
+    alert("Debug OFF – käynnistä app uudelleen");
+  } else {
+    localStorage.setItem("ev_debug", "1");
+    alert("Debug ON – käynnistä app uudelleen");
+  }
 };
 
 elBtnHardReload.onclick = () => {
