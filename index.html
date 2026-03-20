@@ -39,8 +39,12 @@
     .opchip.active { outline: 2px solid #2563eb; }
     .opclear { border: 1px dashed #cbd5e1; }
 
-       /* Debug-napit aina näkyvissä */
+/* Debug-nappi aina näkyvissä */
 .devonly { display: inline-block !important; }
+
+/* Hard reload vain debug-tilassa */
+.hardreloadonly { display: none !important; }
+.debug-on .hardreloadonly { display: inline-block !important; }
 
 /* Debug-paneeli näkyy vain debug-tilassa */
 #debug { display: none; }
