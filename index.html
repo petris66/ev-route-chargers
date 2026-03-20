@@ -199,7 +199,27 @@ elBtnHardReload.onclick = () => {
   u.searchParams.set("v", String(Date.now()));
   location.replace(u.toString());
 };
+let debugTapCount = 0;
+let debugTapTimer = null;
 
+document.getElementById("map").addEventListener("click", () => {
+  debugTapCount++;
+
+  if (debugTapTimer) clearTimeout(debugTapTimer);
+
+  debugTapTimer = setTimeout(() => {
+    debugTapCount = 0;
+  }, 1000);
+
+  if (debugTapCount >= 3) {
+    debugTapCount = 0;
+
+    const enabled = localStorage.getItem("ev_debug") === "1";
+    localStorage.setItem("ev_debug", enabled ? "0" : "1");
+
+    alert("Debug " + (enabled ? "OFF" : "ON") + " – käynnistä app uudelleen");
+  }
+});
 /* ------------------ MAP ------------------ */
 let map, layer;
 
