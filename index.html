@@ -1,1068 +1,2135 @@
-```
 <!DOCTYPE html>
+
 <html lang="fi">
+
 <head>
+
   <meta charset="utf-8" />
+
   <title>EV Route Chargers v1.16</title>
+
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
+
+
   <!-- PWA -->
+
   <link rel="manifest" href="./manifest.webmanifest">
+
   <meta name="theme-color" content="#082338">
+
   <meta name="apple-mobile-web-app-capable" content="yes">
+
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
   <meta name="apple-mobile-web-app-title" content="EV Route">
-  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+
+  <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png?v=1162">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png?v=1162">
+  <link rel="icon" type="image/png" sizes="512x512" href="./icons/icon-512.png?v=1162">
+
+
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
+
+
   <style>
+
     .result-group-title { font-size: 16px; margin: 20px 0 9px; padding-bottom: 5px; border-bottom: 1px solid #cbd5e1; }
+
     html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+
     #map { height: 45vh; height: 45svh; height: 45dvh; min-height: 260px; width: 100%; display:block; }
+
     main { padding: 10px; }
+
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
     .grow { flex: 1; min-width: 210px; }
+
     button { padding: 9px 12px; border-radius: 10px; border: none; cursor: pointer; }
+
     button:disabled { opacity: .6; cursor: not-allowed; }
+
     .primary { background: #2563eb; color: #fff; }
+
     .ghost { background: #f1f5f9; color: #0f172a; }
+
     .pill { background: #f1f5f9; padding: 6px 10px; border-radius: 999px; font-size: 14px; display:flex; gap:8px; align-items:center;}
+
     .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; margin-bottom: 8px; }
+
     .card.out-of-range { border: 2px solid #dc2626; border-left-width: 6px; background: #fff1f2; }
+
     .range-alert { margin-top: 9px; padding: 10px; border-radius: 8px; background: #fee2e2; color: #991b1b; font-weight: 700; font-size: 14px; }
+
     .meta { display: flex; gap: 6px; flex-wrap: wrap; font-size: 13px; margin-top:6px;}
+
     .small { font-size: 13px; }
+
     .warn { color: #b45309; }
+
     .error { color: #b91c1c; }
+
     input { padding: 9px 10px; border: 1px solid #e5e7eb; border-radius: 10px; }
+
     .pill input { padding: 4px 6px; border-radius: 8px; }
+
     #debug { margin-top:10px; white-space:pre-wrap; background:#f8fafc; padding:10px; border-radius:12px; border:1px solid #e5e7eb; max-height: 220px; overflow:auto; display:none; }
+
     .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+
     .opchip { border: 1px solid #e5e7eb; }
+
     .opchip.active { outline: 2px solid #2563eb; }
+
     .opclear { border: 1px dashed #cbd5e1; }
 
+
+
 /* Dev-napit piiloon oletuksena */
+
 .devonly,
+
 .hardreloadonly { display: none !important; }
 
+
+
 /* Näytä dev-napit vain debug-tilassa */
+
 .debug-on .devonly,
+
 .debug-on .hardreloadonly { display: inline-block !important; }
 
+
+
 /* Debug-paneeli näkyy vain debug-tilassa */
+
 #debug { display: none; }
+
 .debug-on #debug { display: block; }
 
+
+
 .brand-mark {background:transparent; width:46px; height:46px; border-radius:12px; overflow:hidden;}
+
 .brand-mark img {display:block; width:100%; height:100%; object-fit:cover;}
+
 /* v1.11: responsive layout only. Routing and data logic unchanged. */
+
 body { background:#f4f7fb; color:#172b4d; }
+
 main { max-width:1100px; margin:0 auto; padding:14px 16px 28px; }
+
 .app-head { display:flex; align-items:center; gap:12px; padding:4px 0 14px; }
+
 .app-head strong { font-size:22px; letter-spacing:-.4px; display:block; }
+
 .app-head small { color:#64748b; font-size:12px; display:block; }
+
 .brand-mark { width:42px; height:42px; display:grid; place-items:center; border-radius:13px; background:#173c65; color:#a4f1bb; font-size:25px; }
+
 .search-panel,.operator-panel,.map-panel { background:white; border:1px solid #e1e7f0; border-radius:16px; padding:13px; margin-bottom:12px; box-shadow:0 2px 12px #0c2c5010; }
+
 .search-panel > .row:first-child { margin-bottom:10px; }
+
 .search-panel input.grow { min-width:0; flex:1 1 200px; box-sizing:border-box; }
+
 .search-panel .pill { font-weight:500; }
+
 #btnFind { font-weight:700; }
+
 .operator-panel summary { cursor:pointer; font-weight:700; padding:3px 0; }
+
 .operator-hint { float:right; font-weight:400; color:#64748b; font-size:12px; }
+
 .operator-panel .row { margin-top:12px; }
+
 .map-panel { padding:10px; }
+
 .map-title { display:flex; justify-content:space-between; align-items:center; padding:3px 4px 9px; }
+
 .map-title span { color:#64748b; font-size:12px; }
+
 .map-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+
 #map { height:390px; min-height:0; border-radius:11px; overflow:hidden; }
+
 .card { background:white; padding:15px; border-radius:15px; box-shadow:0 2px 10px #0c2c500a; }
+
 .card button { min-height:42px; font-weight:650; }
+
 .result-group-title { margin-top:22px; }
+
 @media (max-width:600px) {
+
   main { padding:10px 12px 24px; }
+
   .app-head { padding:4px 2px 12px; }
+
   .app-head strong { font-size:19px; }
+
   .search-panel,.operator-panel,.map-panel { padding:12px; margin-bottom:10px; }
+
   .search-panel > .row:first-child { display:grid; grid-template-columns:1fr; gap:9px; }
+
   .search-panel input.grow { width:100%; min-height:45px; font-size:16px; }
+
   .search-panel > .row:nth-child(2) { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+
   .search-panel .pill { margin:0; justify-content:space-between; padding:8px; font-size:12px; min-width:0; }
+
   .search-panel .pill input { width:68px !important; min-width:0; font-size:16px; box-sizing:border-box; }
+
   #btnFind { grid-column:1/-1; min-height:48px; font-size:15px; }
+
   #btnRetry { grid-column:1/-1; }
+
   .operator-hint { font-size:11px; }
+
   .operator-panel .row { gap:7px; }
+
   .operator-panel .opchip,.operator-panel .opclear,.operator-panel .opall { min-height:42px; }
+
   #operatorFilter { width:100%; min-width:0; font-size:16px; box-sizing:border-box; }
+
   #map { height:300px; }
+
   .map-actions button { min-height:40px; flex:1; }
+
   .card { padding:13px; }
+
   .card .primary { min-height:45px; }
+
 }
-  
+
+
+
 /* v1.12: latausasemien toimintamatkavyöhykkeet (ajomatkan perusteella) */
+
 .card.zone-75 { background:#dcf5df; border:1px solid #83c99a; }
+
 .card.zone-87 { background:#f0faf1; border:1px solid #c5e6ce; }
+
 .card.zone-100 { background:#fff; }
+
 .card.zone-unknown { border:1px dashed #d6a351; }
+
 .card.out-of-range { background:#fff0f0; border:2px solid #dc2626; }
+
 .range-zone-label { display:inline-block; font-size:12px; font-weight:700; margin-top:8px; color:#246b3a; }
+
 .card.zone-unknown .range-zone-label { color:#946200; }
 
+
+
 /* v1.13: tiiviit tuloskortit iPhonelle */
+
 .card .card-top { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+
 .card .card-name { font-size:16px; line-height:1.3; font-weight:750; overflow-wrap:anywhere; }
+
 .card .card-details { display:flex; gap:5px 12px; flex-wrap:wrap; font-size:13px; margin-top:7px; }
+
 .card .card-details strong { font-weight:700; }
+
 .card .range-zone-label { margin-top:5px; font-size:11px; }
+
 .card .card-nav { flex:0 0 auto; margin:0; padding:10px 12px; }
+
 .card .card-note { font-size:12px; margin-top:7px; color:#8a5300; font-weight:650; }
+
 @media(max-width:600px) {
+
   .card { padding:11px 12px; margin-bottom:8px; }
+
   .card .card-name { font-size:15px; }
+
   .card .card-nav { min-height:42px; font-size:13px; }
+
   .result-group-title { scroll-margin-top:12px; }
+
 }
+
 /* v1.14: samat numerot latausasemalistassa ja kartalla */
+
 .station-number { display:inline-flex; align-items:center; justify-content:center; flex:0 0 29px; width:29px; height:29px; border-radius:50%; background:#176f3c; color:#fff; font-weight:800; font-size:14px; }
+
 .card.zone-100 .station-number { background:#334155; }
+
 .card.out-of-range .station-number { background:#b91c1c; }
+
 .card.zone-unknown .station-number { background:#98660c; }
+
 .card-title-line { display:flex; align-items:center; gap:8px; }
+
 .card-map-link { border:0; background:transparent; color:#1d4ed8; font-size:12px; font-weight:700; padding:3px 0; text-decoration:underline; }
+
 .ev-numbered-pin { width:30px; height:30px; display:flex; justify-content:center; align-items:center; border:2px solid white; border-radius:50%; background:#176f3c; color:white; font:800 14px system-ui,sans-serif; box-shadow:0 1px 6px #0006; }
+
 .ev-numbered-pin.zone-100 { background:#334155; }
+
 .ev-numbered-pin.out-of-range { background:#b91c1c; }
+
 .ev-numbered-pin.zone-unknown { background:#98660c; }
+
 </style>
+
 </head>
+
 <body>
 
+
+
 <main>
+
   <header class="app-head"><span class="brand-mark"><img src="./icons/icon-192.png" alt="EV Route Chargers" width="46" height="46"></span><div><strong>EV Route Chargers</strong><small>Seuraava latauspysähdys</small></div></header>
+
   <section class="search-panel">
+
   <div class="row">
+
     <input id="fromCity" class="grow" placeholder="Lähtökaupunki (jos GPS ei toimi)" />
+
     <input id="toCity" class="grow" placeholder="Määränpää (esim. Turku)" />
+
   </div>
 
+
+
   <div class="row" style="margin-top:8px;">
+
     <label class="pill">Akkua (km) <input id="rangeKm" type="number" inputmode="numeric" value="220" style="width:90px;"></label>
+
     <label class="pill">Vara (km) <input id="reserveKm" type="number" inputmode="numeric" value="20" style="width:80px;"></label>
+
     <label class="pill">Hakusäde (km) <input id="radiusKm" type="number" inputmode="numeric" value="40" style="width:80px;"></label>
 
+
+
     <button id="btnFind" class="primary">Etsi seuraava lataus</button>
+
     <button id="btnRetry" class="ghost" style="display:none;">Yritä uudelleen</button>
 
+
+
     <button id="btnHardReload" class="ghost hardreloadonly" title="Jos iPhone näyttää vanhaa versiota">Päivitä “kovaa”</button>
+
     <button id="btnDebug" class="ghost devonly">Debug</button>
+
   </div>
+
+
 
   </section>
+
   <details class="operator-panel"><summary>Operaattorit <span class="operator-hint">Suosikit / Kaikki / omat valinnat</span></summary>
-  <div class="row" style="margin-top:8px;">
-    <input id="operatorFilter" class="grow"
-      placeholder="Tyhjä = kaikki operaattorit; Suosikit = viisi valittua" />
-  </div>
 
   <div class="row" style="margin-top:8px;">
+
+    <input id="operatorFilter" class="grow"
+
+      placeholder="Tyhjä = kaikki operaattorit; Suosikit = viisi valittua" />
+
+  </div>
+
+
+
+  <div class="row" style="margin-top:8px;">
+
     <button type="button" class="ghost opchip" data-op="ABC">ABC</button>
+
     <button type="button" class="ghost opchip" data-op="K-Lataus">K-Lataus</button>
+
     <button type="button" class="ghost opchip" data-op="Neste">Neste</button>
+
     <button type="button" class="ghost opchip" data-op="ST1">ST1</button>
+
     <button type="button" class="ghost opchip" data-op="Faast">Faast</button>
 
+
+
     <button type="button" class="ghost opclear" title="Valitse viisi suosikkia">Suosikit</button>
+
     <button type="button" class="ghost opall" title="Näytä kaikki OCM:n operaattorit ja ABC">Kaikki</button>
+
   </div>
+
+
 
   </details>
+
   <section class="map-panel"><div class="map-title"><strong>Reittikartta</strong><span>Zoomaa ja siirrä karttaa</span></div><div class="map-actions"><button id="btnWholeRoute" class="ghost" type="button" style="display:none;">Näytä koko reitti</button><button id="btnChargingArea" class="ghost" type="button" style="display:none;">Näytä latausalue</button></div><div id="map"></div></section>
+
   <div id="status" class="small" style="margin-top:8px;"></div>
 
+
+
   <div class="actions" id="fallbackActions" style="display:none;">
+
     <button id="btnShowLast" class="ghost">Näytä viimeisin onnistunut tulos</button>
+
     <button id="btnClearLast" class="ghost">Tyhjennä viimeisin tulos</button>
+
   </div>
 
+
+
   <div id="list" style="margin-top:10px;"></div>
+
   <pre id="debug" class="small"></pre>
+
 </main>
 
+
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
 <script>
+
 /* ------------------ CONFIG ------------------ */
+
 const ABC_AFIR_URL = "https://afir.digitraffic.fi/api/charging-network/v1/locations?operatorCountryCode=FI&operatorPartyId=ABC&limit=500";
+
 const OCM_PROXY_BASE = "https://ev-route-chargers.vercel.app/api/ocm";
+
 const LAST_KEY = "ev_route_last_success_v2";
 
+
+
 // Debug päälle URL:lla (?debug=1) TAI localStorage (iPhone/PWA)
+
 let DEBUG_MODE = new URLSearchParams(location.search).get("debug") === "1";
 
+
+
 // iPhone / PWA fallback (muistaa debug-tilan)
+
 if (!DEBUG_MODE && localStorage.getItem("ev_debug") === "1") {
+
   DEBUG_MODE = true;
+
 }
+
+
 
 // jos debug aktivoitu URL:lla → tallennetaan se
+
 if (DEBUG_MODE) {
+
   localStorage.setItem("ev_debug", "1");
+
   document.documentElement.classList.add("debug-on");
+
 }
+
+
 
 /* ------------------ DEBUG ------------------ */
+
 const elDebug = document.getElementById("debug");
+
 function dbg(...args) {
+
   if (!DEBUG_MODE) return;
 
+
+
   const line = args.map(a => {
+
     if (typeof a === "string") return a;
+
     try { return JSON.stringify(a); } catch { return String(a); }
+
   }).join(" ");
 
+
+
   elDebug.textContent += line + "\n";
+
   elDebug.scrollTop = elDebug.scrollHeight;
+
 }
+
 window.addEventListener("error", (e) => dbg("JS ERROR:", e.message));
+
 window.addEventListener("unhandledrejection", (e) => dbg("PROMISE ERROR:", String(e.reason)));
 
+
+
 function debugTopPOIs(pois) {
+
   if (!Array.isArray(pois)) { dbg("DEBUG POI: pois is not an array"); return; }
+
   dbg("DEBUG POI: total returned =", String(pois.length));
+
   pois.slice(0, 10).forEach((p, i) => {
+
     const title = p?.AddressInfo?.Title || "(no title)";
+
     const operator = p?.OperatorInfo?.Title || "(unknown operator)";
+
     const conns = p?.Connections || [];
+
     const isDC = conns.some(c => Number(c?.LevelID) === 3 || String(c?.CurrentType?.Title || "").toUpperCase().includes("DC"));
+
     let maxPower = Math.max(...conns.map(c => Number(c?.PowerKW) || 0), 0);
+
     // Puuttuvaa lataustehoa ei arvata 50 kW:ksi.
+
     dbg(`#${i+1}`, "|", title, "| operator:", operator, "| maxPower:", String(maxPower), "| DC:", String(isDC));
+
   });
+
 }
+
+
 
 /* ------------------ UI ------------------ */
+
 const elFrom = document.getElementById("fromCity");
+
 const elTo = document.getElementById("toCity");
+
 const elRange = document.getElementById("rangeKm");
+
 const elReserve = document.getElementById("reserveKm");
+
 const elRadius = document.getElementById("radiusKm");
+
 const elOperatorFilter = document.getElementById("operatorFilter");
 
+
+
 const elBtn = document.getElementById("btnFind");
+
 const elBtnRetry = document.getElementById("btnRetry");
+
 const elBtnHardReload = document.getElementById("btnHardReload");
+
 const elBtnDebug = document.getElementById("btnDebug");
 
+
+
 const elStatus = document.getElementById("status");
+
 const elList = document.getElementById("list");
 
+
+
 const elFallbackActions = document.getElementById("fallbackActions");
+
 const elBtnShowLast = document.getElementById("btnShowLast");
+
 const elBtnClearLast = document.getElementById("btnClearLast");
 
+
+
 function setStatus(msg, cls="") {
+
   elStatus.className = "small " + cls;
+
   elStatus.textContent = msg;
+
   dbg("STATUS:", msg);
+
 }
+
 function setBusy(isBusy) {
+
   elBtn.disabled = isBusy;
+
   elBtnRetry.disabled = isBusy;
+
 }
+
 function showRetry(show) { elBtnRetry.style.display = show ? "inline-block" : "none"; }
+
 function showFallbackActions(show) { elFallbackActions.style.display = show ? "flex" : "none"; }
 
+
+
 elBtnDebug.onclick = () => {
+
   const enabled = localStorage.getItem("ev_debug") === "1";
 
+
+
   if (enabled) {
+
     localStorage.setItem("ev_debug", "0");
+
     alert("Debug OFF – käynnistä app uudelleen");
+
   } else {
+
     localStorage.setItem("ev_debug", "1");
+
     alert("Debug ON – käynnistä app uudelleen");
+
   }
+
 };
+
+
 
 elBtnHardReload.onclick = () => {
+
   const u = new URL(location.href);
+
   u.searchParams.set("v", String(Date.now()));
+
   location.replace(u.toString());
+
 };
+
 let debugTapCount = 0;
+
 let debugTapTimer = null;
 
+
+
 document.getElementById("map").addEventListener("click", () => {
+
   debugTapCount++;
+
+
 
   if (debugTapTimer) clearTimeout(debugTapTimer);
 
+
+
   debugTapTimer = setTimeout(() => {
+
     debugTapCount = 0;
+
   }, 1000);
 
+
+
   if (debugTapCount >= 3) {
+
     debugTapCount = 0;
 
+
+
     const enabled = localStorage.getItem("ev_debug") === "1";
+
     localStorage.setItem("ev_debug", enabled ? "0" : "1");
 
+
+
     alert("Debug " + (enabled ? "OFF" : "ON") + " – käynnistä app uudelleen");
+
   }
+
 });
+
 /* ------------------ MAP ------------------ */
+
 let map, layer;
 
+
+
 function initMap() {
+
   const mapEl = document.getElementById("map");
+
   if (!mapEl) {
+
     dbg("MAP ERROR: #map element not found");
+
     return;
+
   }
+
   dbg("MAP element size:", mapEl.clientWidth + "x" + mapEl.clientHeight);
 
+
+
   map = L.map("map").setView([60.1699, 24.9384], 6);
+
   const tiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+
     maxZoom: 18,
+
     attribution: "&copy; OpenStreetMap"
+
   }).addTo(map);
+
   tiles.on("tileerror", () => dbg("TILE ERROR"));
+
   layer = L.layerGroup().addTo(map);
 
+
+
   setTimeout(() => {
+
     try { map.invalidateSize(); dbg("invalidateSize OK"); }
+
     catch (e) { dbg("invalidateSize ERR", e?.message || String(e)); }
+
   }, 350);
+
 }
+
+
 
 function safeFitBounds() {
+
   try {
+
     const bounds = layer.getBounds?.();
+
     if (bounds && bounds.isValid && bounds.isValid()) map.fitBounds(bounds, { padding:[20,20] });
+
   } catch (e) { dbg("fitBounds error:", e?.message || String(e)); }
+
 }
+
+
 
 /* ------------------ HELPERS ------------------ */
+
 function haversineKm(lat1, lon1, lat2, lon2) {
+
   const R = 6371;
+
   const dLat = (lat2-lat1) * Math.PI/180;
+
   const dLon = (lon2-lon1) * Math.PI/180;
+
   const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
 }
+
+
 
 async function geocode(name) {
+
   const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(name);
+
   const r = await fetch(url);
+
   const j = await r.json();
+
   if (!j[0]) return null;
+
   return { lat: +j[0].lat, lon: +j[0].lon };
+
 }
+
+
 
 async function getStart() {
+
   return new Promise(resolve => {
+
     if (!navigator.geolocation) return resolve(null);
+
     navigator.geolocation.getCurrentPosition(
+
       p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+
       () => resolve(null),
+
       { enableHighAccuracy: true, timeout: 8000 }
+
     );
+
   });
+
 }
+
+
 
 async function fetchRoute(start, end) {
+
   const url = `https://router.project-osrm.org/route/v1/driving/${start.lon},${start.lat};${end.lon},${end.lat}?overview=full&geometries=geojson`;
+
   const r = await fetch(url);
+
   const j = await r.json();
+
   return j.routes[0].geometry.coordinates;
+
 }
 
+
+
 function pointAlongRoute(coords, km) {
+
   let acc = 0;
+
   for (let i=1;i<coords.length;i++) {
+
     const a = coords[i-1], b = coords[i];
+
     const d = haversineKm(a[1],a[0],b[1],b[0]);
+
     if (acc + d >= km) {
+
       const t = (km - acc)/d;
+
       return { lat: a[1] + (b[1]-a[1])*t, lon: a[0] + (b[0]-a[0])*t };
+
     }
+
     acc += d;
+
   }
+
   const last = coords.at(-1);
+
   return { lat:last[1], lon:last[0] };
+
 }
+
+
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+
+
 async function fetchJsonWithTimeout(url, timeoutMs) {
+
   const controller = new AbortController();
+
   const t = setTimeout(() => controller.abort(), timeoutMs);
 
+
+
   try {
+
     const r = await fetch(url, {
+
       headers: { "Accept": "application/json" },
+
       cache: "no-store",
+
       signal: controller.signal
+
     });
+
+
 
     const text = await r.text();
 
+
+
     // Jos proxy / upstream palauttaa HTML:ää, kyse on lähes aina virhesivusta
+
     const s = text.trim().toLowerCase();
+
     const looksHtml = s.startsWith("<!doctype html") || s.startsWith("<html");
+
     if (looksHtml) {
+
       if (DEBUG_MODE) alert("OCM-haku epäonnistui – palvelu palautti HTML-virhesivun");
+
       console.error("OCM returned HTML instead of JSON", {
+
         status: r.status,
+
         url,
+
         body: text.slice(0, 1000)
+
       });
+
       const err = new Error("OCM returned HTML (likely proxy/upstream timeout)");
+
       err.status = 524;
+
       throw err;
+
     }
+
+
 
     // Yritä parsia JSON turvallisesti
+
     let json;
+
     try {
+
       json = JSON.parse(text);
+
     } catch (parseErr) {
+
       if (DEBUG_MODE) alert("OCM palautti virheellistä dataa (JSON parse failed)");
+
       console.error("Invalid JSON from proxy", {
+
         status: r.status,
+
         url,
+
         body: text.slice(0, 1000)
+
       });
+
       const err = new Error("Invalid JSON from proxy");
+
       err.status = r.status;
+
       throw err;
+
     }
+
+
 
     // HTTP-virhe
+
     if (!r.ok) {
+
       const msg = json?.error || ("HTTP " + r.status);
+
       if (DEBUG_MODE) alert("OCM-haku epäonnistui – tarkista Vercel/API");
+
       console.error("OCM HTTP error", {
+
         status: r.status,
+
         url,
+
         response: json
+
       });
+
       const err = new Error(msg);
+
       err.status = r.status;
+
       err.json = json;
+
       throw err;
+
     }
+
+
 
     // Proxy palautti JSON-muotoisen virheen vaikka HTTP-status olisi 200
+
     if (json && json.ok === false) {
+
       if (DEBUG_MODE) alert("OCM-proxy ilmoitti virheestä – tarkista Vercel/API");
+
       console.error("OCM proxy error payload", {
+
         status: r.status,
+
         url,
+
         response: json
+
       });
+
       const err = new Error(json.error || "OCM proxy error");
+
       err.status = r.status;
+
       err.json = json;
+
       throw err;
+
     }
+
+
 
     return json;
+
   } catch (e) {
+
     if (e.name === "AbortError") {
+
       if (DEBUG_MODE) alert("OCM-haku aikakatkaistiin");
+
       console.error("OCM request timeout", { url, timeoutMs });
+
       const err = new Error("OCM timeout");
+
       err.status = 524;
+
       throw err;
+
     }
+
     throw e;
+
   } finally {
+
     clearTimeout(t);
+
   }
+
 }
+
+
 
 async function fetchOCM(lat, lon, km, maxresults = 25) {
+
   const p = new URLSearchParams({
+
     latitude: String(lat),
+
     longitude: String(lon),
+
     distance: String(km),
+
     distanceunit: "KM",
+
     maxresults: String(maxresults)
+
   });
+
   const url = OCM_PROXY_BASE + "?" + p.toString();
+
   dbg("OCM URL:", url);
 
+
+
   let lastErr = null;
+
   for (let i = 1; i <= 3; i++) {
+
     try { return await fetchJsonWithTimeout(url, 18000); }
+
     catch (e) {
+
       lastErr = e;
+
       dbg("OCM try failed:", String(e?.message || e), "status:", e?.status || "");
+
       if (i < 3) await sleep(500 * i);
+
     }
+
   }
+
   throw lastErr;
+
 }
+
+
 
 /* ------------------ ABC / DIGITRAFFIC ------------------ */
+
 function isABC(operator, title) {
+
   return /\babc\b/i.test(String(operator || "") + " " + String(title || ""));
+
 }
+
 async function fetchABCDigitraffic(target, radiusKm, sharedJson = null) {
+
   const json = sharedJson || await fetchJsonWithTimeout(ABC_AFIR_URL, 20000);
+
   if (!Array.isArray(json?.features)) throw new Error("Digitraffic: asemalista puuttuu");
+
   // Rajapinnan GeoJSON: koordinaattijärjestys [pituusaste, leveysaste].
+
   const mapped = json.features.map(f => {
+
     const p = f.properties || {};
+
     const coords = f.geometry?.coordinates;
+
     const lon = Number(coords?.[0]);
+
     const lat = Number(coords?.[1]);
+
     if (!Array.isArray(coords) || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
     const dcPowers = (p.evses || []).flatMap(e => (e.connectors || []))
+
       .filter(c => String(c.powerType || "").toUpperCase() === "DC")
+
       .map(c => Number(c.maxElectricPower) / 1000)
+
       .filter(n => Number.isFinite(n) && n > 0);
+
     const hasDC = (p.evses || []).some(e => (e.connectors || [])
+
       .some(c => String(c.powerType || "").toUpperCase() === "DC"));
+
     if (!hasDC) return null;
+
     const dist = haversineKm(target.lat, target.lon, lat, lon);
+
     if (dist > radiusKm) return null;
+
     const a = p.address || {};
+
     return { title: p.name || [a.street, a.city].filter(Boolean).join(", ") || "ABC-lataus",
+
       lat, lon, maxPower: Math.max(0, ...dcPowers), isDC: true,
+
       operator: "ABC", dist, source: "Digitraffic" };
+
   }).filter(Boolean);
+
   dbg("ABC Digitraffic stations in radius:", mapped.length);
+
   return mapped;
+
 }
+
+
 
 /* ------------------ OPERATOR FILTER ------------------ */
+
 const ALLOWED_OPERATORS = ["ABC", "K-Lataus", "Neste", "ST1", "Faast"];
+
 // Tyhjä kenttä tarkoittaa kaikkia operaattoreita; Suosikit palauttaa viisi.
+
 function parseOperatorAllowlist() {
+
   const raw = (elOperatorFilter?.value || "").trim();
+
   return raw ? raw.split(",").map(s => s.trim()).filter(Boolean) : [];
+
 }
+
 function operatorMatches(allow, opTitle, stationTitle) {
+
   if (!allow.length) return true;
+
   const operator = String(opTitle || "").toLowerCase();
+
   const title = String(stationTitle || "").toLowerCase();
+
   const has = re => re.test(operator) || re.test(title);
+
   return allow.some(name => {
+
     switch (name.toLowerCase()) {
+
       case "abc": return has(/\babc(?:[ -]lataus)?\b/);
+
       case "k-lataus": return has(/k[ -]?lataus|k[ -]?charge/);
+
       case "st1": return has(/\bst1\b/);
+
       case "neste": return has(/\bneste\b/);
+
       case "faast": return has(/\bfaast\b/);
+
       default: return (operator + " " + title).includes(name.toLowerCase());
+
     }
+
   });
+
 }
+
+
 
 /* ------------------ OPERATOR CHIPS ------------------ */
+
 function normalizeOp(s) {
+
   return String(s || "").trim().toLowerCase();
+
 }
+
+
 
 function getAllowOpsSetFromInput() {
+
   const allow = parseOperatorAllowlist();
+
   return new Set(allow.map(normalizeOp));
+
 }
+
+
 
 function setInputFromAllowOpsSet(set) {
+
   const chips = Array.from(document.querySelectorAll(".opchip"));
+
   const ordered = [];
 
+
+
   chips.forEach(btn => {
+
     const label = btn.getAttribute("data-op") || "";
+
     if (set.has(normalizeOp(label))) ordered.push(label);
+
   });
+
+
 
   const known = new Set(ordered.map(normalizeOp));
+
   Array.from(set).forEach(n => {
+
     if (!known.has(n) && n) ordered.push(n);
+
   });
+
+
 
   elOperatorFilter.value = ordered.join(", ");
+
 }
+
+
 
 function refreshChipUIFromInput() {
+
   const set = getAllowOpsSetFromInput();
+
   document.querySelectorAll(".opchip").forEach(btn => {
+
     const label = btn.getAttribute("data-op") || "";
+
     const on = set.has(normalizeOp(label));
+
     btn.classList.toggle("active", on);
+
   });
+
 }
+
+
 
 function toggleOperator(label) {
+
   const set = getAllowOpsSetFromInput();
 
+
+
   const key = normalizeOp(label);
+
   if (set.has(key)) set.delete(key);
+
   else set.add(key);
 
+
+
   setInputFromAllowOpsSet(set);
+
   refreshChipUIFromInput();
+
 }
+
+
 
 function clearOperators() {
+
   elOperatorFilter.value = ALLOWED_OPERATORS.join(", ");
+
   refreshChipUIFromInput();
+
 }
+
+
 
 document.querySelectorAll(".opchip").forEach(btn => {
+
   btn.addEventListener("click", () => {
+
     toggleOperator(btn.getAttribute("data-op"));
+
   });
+
 });
+
+
 
 document.querySelectorAll(".opclear").forEach(btn => {
+
   btn.addEventListener("click", () => clearOperators());
+
 });
+
 document.querySelectorAll(".opall").forEach(btn => {
+
   btn.addEventListener("click", () => { elOperatorFilter.value = ""; refreshChipUIFromInput(); });
+
 });
+
+
 
 elOperatorFilter.addEventListener("input", () => refreshChipUIFromInput());
+
 clearOperators();
 
+
+
 /* ------------------ RESULTS ------------------ */
+
 function clearUIForSearch() {
+
   currentRouteBounds = null;
+
   currentChargingBounds = null;
+
   showMapControls();
+
   layer.clearLayers();
+
   elList.innerHTML = "";
+
   showRetry(false);
+
   showFallbackActions(false);
+
 }
+
+
 
 // Tieverkkoon perustuvat etäisyydet OSRM:n ajomatkamatriisista.
+
 // Näytetään tulos vain, jos palvelu palauttaa kelvollisen reitin.
+
 async function enrichRoadDistances(start, end, results) {
+
   if (!results.length) return results;
+
   const coords = [start, ...results.map(r => ({lat:r.lat, lon:r.lon})), end];
+
   const points = coords.map(p => `${p.lon},${p.lat}`).join(";");
+
   const url = `https://router.project-osrm.org/table/v1/driving/${points}?annotations=distance`;
+
   try {
+
     const response = await fetchJsonWithTimeout(url, 14000);
+
     if (response.code !== "Ok" || !Array.isArray(response.distances)) throw new Error("OSRM table unavailable");
+
     const d = response.distances;
+
     const last = coords.length - 1;
+
     const base = d[0]?.[last];
+
     return results.map((r, i) => {
+
       const toStation = d[0]?.[i + 1];
+
       const onward = d[i + 1]?.[last];
+
       const valid = Number.isFinite(toStation) && Number.isFinite(onward) && Number.isFinite(base);
+
       return {...r,
+
         roadKm: valid ? toStation / 1000 : null,
+
         detourKm: valid ? Math.max(0, (toStation + onward - base) / 1000) : null
+
       };
+
     });
+
   } catch (e) {
+
     dbg("Road distance unavailable:", String(e));
+
     return results.map(r => ({...r, roadKm:null, detourKm:null}));
+
   }
+
 }
+
+
 
 // V1.15: tarkista poikkeama varsinaisella OSRM-reitillä (ei pelkällä matriisilla).
+
 // Matriisin 0 km -tulos voi syntyä, vaikka asema olisi eri valtatien varrella.
+
 async function exactRouteDistanceKm(points) {
+
   const path = points.map(p => `${p.lon},${p.lat}`).join(";");
+
   const url = `https://router.project-osrm.org/route/v1/driving/${path}?overview=false&steps=false`;
+
   const data = await fetchJsonWithTimeout(url, 14000);
+
   const meters = data?.routes?.[0]?.distance;
+
   if (data?.code !== "Ok" || !Number.isFinite(meters)) throw new Error("Tarkkaa reittiä ei löytynyt");
+
   return meters / 1000;
+
 }
+
+
 
 async function verifyDetours(start, end, results) {
+
   let baseKm;
+
   try { baseKm = await exactRouteDistanceKm([start, end]); }
+
   catch (e) {
+
     dbg("Tarkka perusreitti ei saatavilla:", String(e));
+
     return results.map(r => ({...r, detourKm:null, detourVerified:false}));
+
   }
+
   // Rajattu samanaikaisuus, jotta julkista reitityspalvelua ei kuormiteta.
+
   const out = [];
+
   for (let i=0; i<results.length; i+=3) {
+
     const batch = results.slice(i,i+3);
+
     const verified = await Promise.all(batch.map(async r => {
+
       try {
+
         const viaKm = await exactRouteDistanceKm([start, {lat:r.lat,lon:r.lon}, end]);
+
         const difference = viaKm - baseKm;
+
         // Pienet pyöristys- ja reititysheitot ovat mahdollisia; iso negatiivinen
+
         // erotus tarkoittaa ristiriitaa eikä sitä saa merkitä 0,0 km:ksi.
+
         if (difference < -0.15) throw new Error("Reittien etäisyydet ristiriidassa");
+
         return {...r, detourKm:Math.max(0,difference), detourVerified:true};
+
       } catch(e) {
+
         dbg("Lisämatkaa ei voitu varmistaa:", r.name || r.title || "asema", String(e));
+
         return {...r, detourKm:null, detourVerified:false};
+
       }
+
     }));
+
     out.push(...verified);
+
   }
+
   return out;
+
 }
+
+
 
 let currentRouteBounds = null;
+
 let currentChargingBounds = null;
+
 function fitChargingArea() {
+
   if (!map || !currentChargingBounds || !currentChargingBounds.isValid()) return;
+
   map.invalidateSize({pan:false});
+
   map.fitBounds(currentChargingBounds, {padding:[30,30], maxZoom:12, animate:false});
+
 }
+
 function showMapControls() {
+
   document.getElementById("btnWholeRoute").style.display = currentRouteBounds ? "inline-block" : "none";
+
   document.getElementById("btnChargingArea").style.display = currentChargingBounds ? "inline-block" : "none";
+
 }
+
 document.getElementById("btnWholeRoute").onclick = fitWholeRoute;
+
 document.getElementById("btnChargingArea").onclick = fitChargingArea;
+
 function fitWholeRoute() {
+
   if (!map || !currentRouteBounds || !currentRouteBounds.isValid()) return;
+
   map.invalidateSize();
+
   map.fitBounds(currentRouteBounds, { padding: [24, 24], maxZoom: 13 });
+
 }
+
 function renderResults(final, suffix = "", usableKm = null) {
+
   elList.innerHTML = "";
+
   let previousGroup = "";
+
   final.forEach((r, index) => {
+
     const group = r.resultGroup || (r.rangeStatus === "outside" ? "outside" : "recommended");
+
     if (group !== previousGroup) {
+
       const h = document.createElement("h3");
+
       h.className = "result-group-title";
+
       h.textContent = group === "early" ? "Aikaisemmat latausasemat" : group === "outside" ? "Toimintamatkan ulkopuolella / varmistamattomat" : "Suositellut latausasemat";
+
       elList.appendChild(h);
+
       previousGroup = group;
+
     }
+
+
 
     const card = document.createElement("div");
+
     const ratio = Number.isFinite(r.roadKm) && Number.isFinite(usableKm) && usableKm > 0
+
       ? r.roadKm / usableKm : null;
+
     const zone = r.rangeStatus === "outside" ? "out-of-range"
+
       : ratio === null || r.rangeStatus === "unknown" ? "zone-unknown"
+
       : ratio <= 0.75 ? "zone-75"
+
       : ratio <= 0.87 ? "zone-87" : "zone-100";
+
     card.className = "card " + zone;
+
     const stationNumber = index + 1;
+
     const marker = L.marker([r.lat, r.lon], {
+
       icon: L.divIcon({className:"", html:`<span class="ev-numbered-pin ${zone}">${stationNumber}</span>`, iconSize:[30,30], iconAnchor:[15,15], popupAnchor:[0,-16]})
+
     }).addTo(layer);
+
     // Leaflet luo popupin tekstisolmuista, jolloin asemien nimet eivät pääse HTML:ksi.
+
     const popup = document.createElement("div");
+
     const popupTitle = document.createElement("strong");
+
     popupTitle.textContent = `${stationNumber}. ${r.title}`;
+
     popup.appendChild(popupTitle);
+
     const popupDetails = document.createElement("div");
+
     popupDetails.textContent = `${r.maxPower > 0 ? Math.round(r.maxPower) + " kW" : "Teho ei tiedossa"} · ${Number.isFinite(r.roadKm) ? "Ajomatka " + r.roadKm.toFixed(1) + " km" : "Ajomatka ei saatavilla"}${Number.isFinite(r.detourKm) ? " · Lisämatka " + r.detourKm.toFixed(1) + " km" : " · Lisämatka ei laskettavissa"}`;
+
     popup.appendChild(popupDetails);
+
     marker.bindPopup(popup);
+
     function focusStation() {
+
       const mapPanel = document.querySelector(".map-panel");
+
       mapPanel?.scrollIntoView({behavior:"smooth",block:"start"});
+
       // Päivitä kartan mitat vasta vierityksen jälkeen.
+
       setTimeout(() => {
+
         map.invalidateSize();
+
         map.setView([r.lat, r.lon], Math.max(map.getZoom(), 12), {animate:true});
+
         marker.openPopup();
+
       }, 350);
+
     }
+
     const zoneLabel = zone === "zone-75" ? "Aikainen lataus · enintään 75 %"
+
       : zone === "zone-87" ? "Välimatkan lataus · 75–87 %"
+
       : zone === "zone-100" ? "Latausrajan tuntumassa · 87–100 %"
+
       : zone === "zone-unknown" ? "Ajomatkaa ei voitu varmistaa" : "";
+
     const marginKm = Number.isFinite(r.roadKm) && Number.isFinite(usableKm) ? usableKm - r.roadKm : null;
+
     card.innerHTML = `
+
       <div class="card-top">
+
         <div><div class="card-title-line"><span class="station-number">${stationNumber}</span><div class="card-name">${r.title}</div></div>
+
           ${zoneLabel ? `<div class="range-zone-label">${zoneLabel}</div>` : ""}
+
         </div>
+
         <button class="primary card-nav">Navigoi</button>
+
       </div>
+
       <button class="card-map-link" type="button">📍 Näytä kartalla #${stationNumber}</button>
+
       <div class="card-details">
+
         <span><strong>${r.maxPower > 0 ? Math.round(r.maxPower) + " kW" : "Teho ei tiedossa"}</strong></span>
+
         <span>${Number.isFinite(r.roadKm) ? "Ajomatka <strong>" + r.roadKm.toFixed(1) + " km</strong>" : "Ajomatka ei saatavilla"}</span>
+
         ${Number.isFinite(r.detourKm) ? `<span>Lisämatka <strong>${r.detourKm.toFixed(1)} km</strong></span>` : `<span>Lisämatka ei laskettavissa</span>`}
+
       </div>
+
       ${marginKm !== null && marginKm >= 0 && marginKm < 10 ? `<div class="card-note">⚠ Toimintamatkan marginaali vain ${marginKm.toFixed(1)} km</div>` : ""}
+
       ${r.rangeStatus === "unknown" ? `<div class="card-note">Ajomatkaa ei voitu varmistaa</div>` : ""}
+
       ${r.rangeStatus === "outside" ? `<div class="range-alert">⚠ Ei riitä asetetulla varalla${Number.isFinite(r.shortfallKm) ? ` – ylitys ${r.shortfallKm.toFixed(1)} km` : ""}</div>` : ""}
+
     `;
+
     card.querySelector(".card-map-link").onclick = focusStation;
+
     card.querySelector(".card-nav").onclick = () =>
+
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}`, "_blank");
+
     elList.appendChild(card);
+
   });
 
+
+
   // Tulosten piirtäminen ei saa muuttaa käyttäjän valitsemaa karttanäkymää.
+
   setStatus(`Löytyi ${final.length} latauspaikkaa.${suffix}`);
+
 }
+
+
 
 function mapPoisToResults(pois, target, allowOps, abcResults = null) {
+
   const mapped = (pois || []).map(p => {
+
     const ai = p.AddressInfo || {};
+
     const conns = p.Connections || [];
 
+
+
     const isDC = conns.some(c =>
+
       Number(c.LevelID) === 3 ||
+
       String(c.CurrentType?.Title || "").toUpperCase().includes("DC")
+
     );
 
+
+
     let maxPower = Math.max(...conns.map(c => Number(c.PowerKW) || 0), 0);
+
     // Puuttuvaa lataustehoa ei arvata 50 kW:ksi.
 
+
+
     const operator = p.OperatorInfo?.Title || "";
+
     return {
+
       title: ai.Title || "Nimetön latauspaikka",
+
       lat: Number(ai.Latitude),
+
       lon: Number(ai.Longitude),
+
       maxPower,
+
       isDC,
+
       operator,
+
       dist: haversineKm(target.lat, target.lon, Number(ai.Latitude), Number(ai.Longitude))
+
     };
+
   }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.isDC);
 
+
+
   // Kun AFIR toimii, ABC tulee vain sieltä; ei vanhentuneita OCM-kopioita.
+
   const combined = abcResults === null ? mapped : [
+
     ...mapped.filter(x => !isABC(x.operator, x.title)), ...abcResults
+
   ];
+
   const filteredByOp = combined.filter(x => operatorMatches(allowOps, x.operator, x.title));
+
   const fast = filteredByOp.filter(x => x.maxPower >= 150);
+
   const final = (fast.length ? fast : filteredByOp)
+
     .sort((a,b)=>(b.maxPower-a.maxPower)||(a.dist-b.dist))
+
     .slice(0,60); // Ehdokkaat eri puolilta reittiä; ajomatkat ratkaisevat lopullisen valinnan.
 
+
+
   return { mapped: combined, filteredByOp, fastCount: fast.length, final };
+
 }
+
+
 
 /* ------------------ LAST SUCCESS ------------------ */
+
 function saveLast(payload) { try { localStorage.setItem(LAST_KEY, JSON.stringify(payload)); } catch {} }
+
 function loadLast() { try { const s = localStorage.getItem(LAST_KEY); return s ? JSON.parse(s) : null; } catch { return null; } }
+
 function clearLast() { try { localStorage.removeItem(LAST_KEY); } catch {} }
 
+
+
 function showLastIfAvailable() {
+
   const last = loadLast();
+
   if (!last) return setStatus("Ei tallennettua aiempaa tulosta.", "warn");
 
+
+
   layer.clearLayers();
+
   elList.innerHTML = "";
 
+
+
   currentRouteBounds = last.route ? L.latLngBounds(last.route.map(([lon, lat]) => [lat, lon])) : null;
+
   currentChargingBounds = last.route && last.target ? L.latLngBounds([[last.route[0][1], last.route[0][0]], [last.target.lat, last.target.lon]]) : null;
+
   showMapControls();
+
   if (last.route) L.geoJSON({ type:"LineString", coordinates: last.route }, { color:"#2563eb", weight:4 }).addTo(layer);
+
   if (last.target) L.circleMarker([last.target.lat, last.target.lon], { radius:8, color:"#f59e0b", fillOpacity:0.9 })
+
     .addTo(layer).bindPopup(`<b>Seuraava lataus</b><br>${last.usableKm?.toFixed?.(0) ?? ""} km`);
 
+
+
   if (last.results) {
+
     renderResults(last.results, " (viimeisin onnistunut)", last.usableKm);
+
     requestAnimationFrame(() => requestAnimationFrame(() => fitChargingArea()));
+
   }
+
   else setStatus("Tallennettu tulos oli puutteellinen.", "warn");
+
 }
 
+
+
 /* ------------------ MAIN ------------------ */
+
 async function runSearch() {
+
   clearUIForSearch();
+
   setBusy(true);
 
+
+
   const toName = elTo.value.trim();
+
   if (!toName) { setBusy(false); return setStatus("Anna määränpää.", "warn"); }
 
+
+
   const usableKm = Math.max(0, Number(elRange.value) - Number(elReserve.value));
+
   if (usableKm <= 0) { setBusy(false); return setStatus("Akkua − vara = 0 km. Pienennä varaa tai nosta akkua.", "warn"); }
 
+
+
   try {
+
     setStatus("Haetaan lähtö ja määränpää…");
 
+
+
     // Käyttäjän kirjoittama lähtöpaikka on ensisijainen. GPS vain tyhjällä kentällä.
+
     const fromName = elFrom.value.trim();
+
     let start = fromName ? await geocode(fromName) : await getStart();
+
     if (!start) {
+
       setBusy(false);
+
       return setStatus(fromName ? "Lähtöpaikkaa ei löytynyt. Tarkista kirjoitusasu." : "GPS ei käytettävissä – anna lähtökaupunki.", "warn");
+
     }
 
+
+
     const end = await geocode(toName);
+
     if (!end) { setBusy(false); return setStatus("Määränpäätä ei löytynyt. Tarkista kirjoitusasu (esim. Turku).", "warn"); }
 
+
+
     setStatus("Haetaan reitti…");
+
     const route = await fetchRoute(start, end);
+
     currentRouteBounds = L.latLngBounds(route.map(([lon, lat]) => [lat, lon]));
+
+
 
     L.geoJSON({ type:"LineString", coordinates: route }, { color:"#2563eb", weight:4 }).addTo(layer);
 
+
+
     const target = pointAlongRoute(route, usableKm);
+
     L.circleMarker([target.lat, target.lon], { radius:8, color:"#f59e0b", fillOpacity:0.9 })
+
       .addTo(layer).bindPopup(`<b>Seuraava lataus</b><br>${usableKm.toFixed(0)} km`);
 
+
+
     setTimeout(() => map.invalidateSize(), 50);
+
     currentChargingBounds = L.latLngBounds([[start.lat, start.lon], [target.lat, target.lon]]);
+
     // Rajataan näkymä lähtöpisteeseen ja lataustavoitteeseen.
+
     // Koko reitin geometrian lisääminen tähän saattoi zoomata kartan liian kauas.
 
+
+
     showMapControls();
+
     fitChargingArea();
+
+
 
     setStatus("Haetaan latauspisteet…");
 
+
+
     const allowOps = parseOperatorAllowlist();
+
     const radiusKm = Number(elRadius.value);
 
+
+
     // Kolme hakualuetta reitin varrelta: aikaisemmat pysähdykset ja viimeinen latauskohta.
+
     // Yksi OCM-haku per alue; ABC:n koko aineisto haetaan vain kerran.
+
     const fractions = [0.75, 0.87, 1];
+
     const centers = fractions.map(f => pointAlongRoute(route, usableKm * f));
+
     const allPois = [];
+
     let successfulOCM = 0;
+
     for (let i = 0; i < centers.length; i++) {
+
       setStatus(`Haetaan latausasemia reitin varrelta (${i + 1}/${centers.length})…`);
+
       const center = centers[i];
+
       try {
+
         const items = await fetchOCM(center.lat, center.lon, radiusKm, 75);
+
         if (Array.isArray(items)) { allPois.push(...items); successfulOCM++; }
+
       } catch (e) {
+
         dbg("OCM area failed:", i, String(e));
+
       }
+
     }
+
     let abcResults = null;
+
     try {
+
       setStatus("Haetaan ABC-asemat Digitrafficista…");
+
       const abcJson = await fetchJsonWithTimeout(ABC_AFIR_URL, 20000);
+
       const abcById = new Map();
+
       for (const center of centers) {
+
         const stations = await fetchABCDigitraffic(center, radiusKm, abcJson);
+
         for (const station of stations) abcById.set(`${station.lat.toFixed(5)},${station.lon.toFixed(5)}`, station);
+
       }
+
       abcResults = [...abcById.values()];
+
     } catch (e) {
+
       dbg("ABC Digitraffic unavailable:", String(e));
+
     }
+
     if (!successfulOCM && abcResults === null) throw new Error("Latausasemien tietolähteet eivät vastanneet");
+
     const poisById = new Map();
+
     for (const poi of allPois) {
+
       const id = poi.ID ?? `${poi.AddressInfo?.Latitude},${poi.AddressInfo?.Longitude},${poi.AddressInfo?.Title}`;
+
       poisById.set(id, poi);
+
     }
+
     const pois = [...poisById.values()];
+
     const { mapped, filteredByOp, fastCount, final } = mapPoisToResults(pois, target, allowOps, abcResults);
 
+
+
     if (!mapped.length) {
+
       setBusy(false);
+
       setStatus("Ei löytynyt DC-latureita tällä haulla. Kokeile isompaa hakusädettä.", "warn");
+
       showFallbackActions(!!loadLast());
+
       return;
+
     }
+
+
 
     if (allowOps.length && !filteredByOp.length) {
+
       setBusy(false);
+
       setStatus("Operaattorisuodatus poisti kaikki tulokset. Laajenna listaa tai tyhjennä suodatin.", "warn");
+
       showFallbackActions(!!loadLast());
+
       return;
+
     }
+
+
 
     if (!final.length) {
+
       setBusy(false);
+
       setStatus("Ei löytynyt sopivia latauspaikkoja tällä haulla. Kokeile isompaa hakusädettä.", "warn");
+
       showFallbackActions(!!loadLast());
+
       return;
+
     }
+
+
 
     setStatus("Lasketaan ajomatkat tieverkkoa pitkin…");
+
     // OSRM:n matriisi pidetään kohtuullisena; jaetaan ehdokkaat pieniin eriin.
+
     const roadResults = [];
+
     for (let i = 0; i < final.length; i += 12) {
+
       roadResults.push(...await enrichRoadDistances(start, end, final.slice(i, i + 12)));
+
     }
+
     setStatus("Tarkistetaan lisämatkat latausasemien kautta…");
+
     const verifiedResults = await verifyDetours(start, end, roadResults);
+
     const checked = verifiedResults.map(r => ({...r, rangeStatus: !Number.isFinite(r.roadKm) ? "unknown" : r.roadKm <= usableKm ? "within" : "outside", shortfallKm: Number.isFinite(r.roadKm) ? Math.max(0, r.roadKm - usableKm) : null}));
+
     const reachable = checked.filter(r => r.rangeStatus === "within").sort((a,b) => b.roadKm-a.roadKm || b.maxPower-a.maxPower);
+
     const others = checked.filter(r => r.rangeStatus !== "within").sort((a,b) => (a.roadKm ?? Infinity)-(b.roadKm ?? Infinity));
+
     // Kolme lähellä tavoitekohtaa ja kaksi aikaisempaa vaihtoehtoa.
+
     // V1.15: lähellä latausrajaa olevat ehdokkaat: poikkeama reitiltä
+
     // ratkaisee ensisijaisesti, mutta liian aikainen lataus saa haittapisteitä.
+
     // Vertailu tehdään vain saavutettavissa olevien asemien kesken.
+
     const recommendationScore = r => {
+
       const earlyKm = Math.max(0, usableKm - r.roadKm);
+
       const detour = Number.isFinite(r.detourKm) ? Math.max(0, r.detourKm) : 100;
+
       const powerBonus = r.maxPower > 0 ? Math.min(r.maxPower, 400) / 400 : 0;
+
       return detour * 2 + earlyKm * 0.25 - powerBonus * 0.5;
+
     };
+
     const nearTarget = reachable.slice(0,3).sort((a,b) => recommendationScore(a)-recommendationScore(b));
+
     const early = reachable.filter(r => !nearTarget.includes(r)).sort((a,b) => a.roadKm-b.roadKm).slice(0,2);
+
     const shown = [
+
       ...nearTarget.map(r => ({...r, resultGroup:"recommended"})),
+
       ...early.map(r => ({...r, resultGroup:"early"})),
+
       ...others.slice(0,5).map(r => ({...r, resultGroup:"outside"}))
+
     ];
+
     saveLast({ route, target, usableKm, results: shown, savedAt: Date.now() });
 
+
+
     const suffix =
+
       (final.length < 5 ? ` (näytetään ${final.length}/5 – kokeile isompaa hakusädettä)` : "") +
+
       (fastCount ? "" : " (ei ≥150 kW osumia – näytetään parhaat DC-laturit)");
 
+
+
     renderResults(shown, ` (toimintamatkan sisällä ${reachable.length}, muut/varmistamattomat ${others.length}; mukana myös aikaisempia asemia)` + (abcResults === null ? " (ABC: OCM-varatiedot)" : " (ABC: Digitraffic)"), usableKm);
+
     // Siirry mobiilissa tuloksiin vasta uuden haun valmistuttua.
+
     if (window.matchMedia("(max-width: 600px)").matches) {
+
       requestAnimationFrame(() => {
+
         const heading = elList.querySelector(".result-group-title");
+
         if (heading) heading.scrollIntoView({behavior:"smooth",block:"start"});
+
       });
+
     }
+
     setBusy(false);
+
     // Sovita kartta vasta tuloskorttien valmistuttua, jolloin latausvaihe
+
     // tai kartan koon päivitys ei enää muuta käyttäjän näkemää zoomausta.
+
     requestAnimationFrame(() => requestAnimationFrame(() => fitChargingArea()));
 
+
+
   } catch (e) {
+
     console.error(e);
+
     dbg("CATCH:", e?.message || String(e), "status:", e?.status || "");
+
     showRetry(true);
+
     showFallbackActions(!!loadLast());
 
+
+
     const msg = String(e?.message || e);
+
     if (msg.toLowerCase().includes("ocm") || e?.status === 524 || e?.status === 503 || e?.status === 504) {
+
       setStatus("OCM ei vastannut nyt (ruuhka/timeout). Yritä uudelleen hetken päästä.", "error");
+
     } else if (e?.status === 401 || e?.status === 403) {
+
       setStatus("OCM/Vercel hylkäsi pyynnön. Tarkista Vercel-tili, API-avain ja projektin asetukset.", "error");
+
     } else if (e?.status >= 500) {
+
       setStatus("Palvelinvirhe lataushaussa. Tarkista Vercel/API.", "error");
+
     } else {
+
       setStatus("Haku epäonnistui: " + msg, "error");
+
     }
 
+
+
     setBusy(false);
+
   }
+
 }
 
+
+
 /* ------------------ BUTTONS ------------------ */
+
 document.getElementById("btnFind").onclick = runSearch;
+
 document.getElementById("btnRetry").onclick = runSearch;
 
+
+
 elBtnShowLast.onclick = () => showLastIfAvailable();
+
 elBtnClearLast.onclick = () => { clearLast(); setStatus("Viimeisin tulos tyhjennetty.", "warn"); showFallbackActions(false); };
 
+
+
 /* init */
+
 document.addEventListener("DOMContentLoaded", () => {
+
   initMap();
+
   setStatus("EV Route v1.16 – ABC Digitraffic. Syötä määränpää ja hae seuraava lataus." + (DEBUG_MODE ? " (Debug mode ON)" : ""));
+
 });
+
 </script>
+
+
 
 <!-- PWA SW register -->
+
 <script>
+
   if ("serviceWorker" in navigator) {
+
     navigator.serviceWorker.register("./sw.js", {scope:"./"}).catch(()=>{});
+
   }
+
 </script>
 
+
+
 </body>
+
 </html>
