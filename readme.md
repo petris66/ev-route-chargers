@@ -39,3 +39,7 @@ https://petris66.github.io/ev-route-chargers/
 Frontend on täysin staattinen ja toimii suoraan GitHub Pagesissa.
 
 API-kutsut tehdään Vercelin kautta:
+
+## Lisenssi
+
+Tämä projekti on lisensoitu [MIT-lisenssillä](LICENSE).
