@@ -1077,11 +1077,134 @@ function attachABCTariffs(stations, tariffs) {
     station.priceNote = 'Digitraffic / AD_HOC_PAYMENT; mahdolliset aikamaksut erikseen';
   }
 }
+// OPERATOR PRICE TEST. K-Lataus uses published registered-customer base DC
+// rates; they are NOT live station-specific rates. Neste night price applies
+// only at confirmed participating locations and is NOT a day price.
+const NESTE_NIGHT_LOCATIONS = [
+  ['espoo','muurala'], ['forssa','autokeidas'],
+  ['helsinki','eläintarha'], ['helsinki','hermanni'], ['helsinki','malmi'],
+  ['hollola','hopeakallio'], ['jyväskylä','kirri'],
+  ['kerava','alikeravantie'], ['kokkola','minimani'],
+  ['kuopio','matkus'], ['pirkkala','linnakallio'],
+  ['pori','tiilimäki'], ['raisio','mylly'],
+  ['vantaa','tammisto'], ['vantaa','varisto']
+];
+function normalizeStationText(value) {
+  return String(value || '').toLocaleLowerCase('fi-FI')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9]+/g,' ');
+}
+
+// St1 official card/mobile contactless prices, snapshot 24.10.2026.
+// Show price ONLY if exact identifying locality and place token(s) match.
+const ST1_CARD_PRICES = [
+  ['Aura', 0.35],
+  ['Espoo Bemböle', 0.35],
+  ['Espoo Suomenoja Finnoonristi', 0.34],
+  ['Helsinki Ala-Tikkurila', 0.34],
+  ['Helsinki Itäkeskus', 0.34],
+  ['Helsinki Kruununhaka', 0.34],
+  ['Helsinki Lauttasaari', 0.34],
+  ['Helsinki Tullinpuomi', 0.34],
+  ['Vantaa Kaivoksela', 0.34],
+  ['Vantaa Mikkola', 0.34],
+  ['Vantaa Ruskeasanta', 0.34],
+  ['Äänekoski Hirvaskangas', 0.35],
+  ['Ylöjärvi Vanha Vaasantie', 0.34],
+  ['Huittinen Mommola', 0.34],
+  ['Hämeenlinna Iittala Aropaltiontie', 0.34],
+  ['Ii', 0.36],
+  ['Joensuu Rauhankatu', 0.38],
+  ['Jyväskylä Matkakeskus', 0.38],
+  ['Jämsä', 0.35],
+  ['Kalajoki', 0.34],
+  ['Kempele Zeppelin', 0.35],
+  ['Kokkola Vitsari', 0.35],
+  ['Laitila', 0.35],
+  ['Liperi Ylämylly', 0.38],
+  ['Loimaa Kartanomäenkatu', 0.35],
+  ['Mikkeli Ristiinantie', 0.34],
+  ['Muurame', 0.35],
+  ['Mäntsälä P', 0.34],
+  ['Orivesi Ruovedentie', 0.34],
+  ['Parkano Pahkalantie', 0.37],
+  ['Pihtipudas', 0.36],
+  ['Porvoo Kuninkaanportti', 0.34],
+  ['Raasepori Karjaa', 0.34],
+  ['Rovaniemi Erottaja', 0.35],
+  ['Rovaniemi Napapiiri', 0.35],
+  ['Rovaniemi Teollisuustie', 0.35],
+  ['Salo Halikko', 0.34],
+  ['Siilinjärvi', 0.34],
+  ['Tampere Sammon Valtatie', 0.35],
+  ['Turku Oriketo', 0.35],
+  ['Turku Sata1', 0.35],
+  ['Vaasa Palosaari', 0.34],
+];
+function st1ConfirmedPrice(station) {
+  const title = normalizeStationText(station.title).trim();
+  const address = normalizeStationText(station.address).trim();
+  const text = `${title} ${address}`;
+  // Avoid city-only false positives: generic city names cannot identify a St1 station.
+  const confirmed = ST1_CARD_PRICES.filter(([name]) => {
+    const tokens = normalizeStationText(name).trim().split(/\s+/);
+    if (tokens.length === 1) {
+      // One-word station names must actually appear in the title (not just address).
+      return (` ${title} `).includes(` ${tokens[0]} `);
+    }
+    return tokens.every(token => (` ${text} `).includes(` ${token} `));
+  });
+  return confirmed.length === 1 ? confirmed[0][1] : null;
+}
+function stationKind(station) {
+  // Do not attribute K-Lataus member rates to roaming operators.
+  const op = normalizeStationText(station.operator);
+  const title = normalizeStationText(station.title);
+  if (/\bk lataus\b/.test(op) || /\bk lataus\b/.test(title)) return 'k';
+  if (/\bneste\b/.test(op) || /\bneste\b/.test(title)) return 'neste';
+  if (/\bst1\b/.test(op) || /\bst1\b/.test(title)) return 'st1';
+  if (/\bfaast\b/.test(op) || /\bfaast\b/.test(title)) return 'faast';
+  return 'other';
+}
+function isNesteNightLocation(station) {
+  const title = normalizeStationText(station.title);
+  const address = normalizeStationText(station.address);
+  const data = `${title} ${address}`;
+  return NESTE_NIGHT_LOCATIONS.some(([city, name]) => {
+    const c = normalizeStationText(city).trim();
+    const n = normalizeStationText(name).trim();
+    // Avoid declaring generic "Neste Jyväskylä" eligible: BOTH parts required.
+    return data.includes(c) && data.includes(n);
+  });
+}
 function energyPriceDisplay(station) {
-  if (station.operator !== 'ABC' || station.source !== 'Digitraffic') return 'Hintaa ei saatavilla';
-  if (!Number.isFinite(station.energyPrice)) return 'Hintaa ei saatavilla';
-  return new Intl.NumberFormat('fi-FI', {minimumFractionDigits: 2, maximumFractionDigits: 2})
-    .format(station.energyPrice) + ' €/kWh (sis. ALV)';
+  const fmt = v => new Intl.NumberFormat('fi-FI', {minimumFractionDigits:2,maximumFractionDigits:2}).format(v);
+  if (station.operator === 'ABC' && station.source === 'Digitraffic') {
+    return Number.isFinite(station.energyPrice) ? fmt(station.energyPrice)+' €/kWh (sis. ALV)' : 'Hintaa ei saatavilla';
+  }
+  if (!(station.isDC && Number(station.maxPower) > 50)) return 'Suurteholatauksen hintaa ei saatavilla';
+  const op = stationKind(station);
+  if (op === 'k') return 'K-Lataus asiakas · päivä 0,35 €/kWh · yö 0,30 €/kWh';
+  if (op === 'faast') return 'Faast-asiakas · 0,33 €/kWh';
+  if (op === 'st1') { const price = st1ConfirmedPrice(station); return price === null ? 'St1 · asemakohtainen hinta ei vahvistettu' : `St1 lähimaksu · ${fmt(price)} €/kWh`; }
+  if (op === 'neste' && isNesteNightLocation(station)) return 'Neste · yöetu 0,31 €/kWh';
+  if (op === 'neste') return 'Neste · asemakohtainen hinta – tarkista Neste-äpistä';
+  return 'Hintaa ei saatavilla';
+}
+function priceDetailsDisplay(station) {
+  if (station.operator === 'ABC' && station.source === 'Digitraffic') {
+    return Number.isFinite(station.energyPrice)
+      ? `Digitraffic: kertamaksun energiahinta; mahdolliset aika-/pysäköintimaksut erikseen.${station.priceUpdated ? ' Päivitetty '+station.priceUpdated.slice(0,10)+'.' : ''} Tarkista hinta ennen latausta.`
+      : 'Lataushintaa ei ole vahvistettu tälle pisteelle.';
+  }
+  if (!(station.isDC && Number(station.maxPower) > 50)) return 'Näytämme vain yli 50 kW DC-latauksen hinnat.';
+  const op = stationKind(station);
+  if (op === 'k') return 'Rekisteröityneen asiakkaan perushinta: päivä klo 07–20, yö klo 20–07. Yli 60 min +0,20 €/min. Ei reaaliaikainen asemakohtainen hinta; poikkeukset mahdollisia. Tarkista K-Lataus-sovelluksesta.';
+  if (op === 'faast') return 'Edellyttää rekisteröitymistä Faast-asiakkaaksi ja latauksen aloittamista Virta-sovelluksessa Faast-asiakkuudella. Vain DC-suurteholataus. Varmista aseman mahdollinen tarjoushinta ennen latausta.';
+  if (op === 'st1') return st1ConfirmedPrice(station) === null ? 'St1: asemaa ei voitu yhdistää luotettavasti viralliseen hinnastoon; tarkista St1:n hinnastosivulta.' : 'St1:n julkaisema asemakohtainen maksu pankki-/luottokortin tai Apple Payn / Google Payn lähimaksulla. Ei Virta-roaming-hinta. Hinnaston tarkistus 24.10.2026; varmista ajantasainen hinta ennen latausta.';
+  if (op === 'neste' && isNesteNightLocation(station)) return 'Nesteen julkaisema yöetu vain valituilla asemilla klo 19–07. Päivähinta asemakohtainen, tarkista Neste-äpistä. Hinnat voivat muuttua.';
+  if (op === 'neste') return 'Nesteellä hinta vaihtelee asemittain. Tälle asemalle ei vahvistettu yöetua. Tarkista Neste-äpistä.';
+  return 'Lataushintaa ei ole vahvistettu tälle pisteelle.';
 }
 
 /* ------------------ ABC / DIGITRAFFIC ------------------ */
@@ -1672,7 +1795,7 @@ function renderResults(final, suffix = "", usableKm = null) {
 
       <div class="card-price" style="margin:8px 0;padding:10px;border:1px solid #cbd5e1;border-radius:10px;">
         <strong>⚡ ${energyPriceDisplay(r)}</strong>
-        ${Number.isFinite(r.energyPrice) ? `<div class="small">Digitraffic: kertamaksun energiahinta; mahdolliset aika-/pysäköintimaksut erikseen.${r.priceUpdated ? ' Päivitetty '+r.priceUpdated.slice(0,10)+'.' : ''} Tarkista hinta ennen latausta.</div>` : `<div class="small">Lataushintaa ei ole vahvistettu tälle pisteelle.</div>`}
+        <div class="small">${priceDetailsDisplay(r)}</div>
       </div>
       <div class="card-details">
 
@@ -2232,7 +2355,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initMap();
 
-  setStatus("EV Route v1.20.1 TEST – ABC Digitraffic. Syötä määränpää ja hae seuraava lataus." + (DEBUG_MODE ? " (Debug mode ON)" : ""));
+  setStatus("EV Route v1.23 PRICE TEST – ABC Digitraffic. Syötä määränpää ja hae seuraava lataus." + (DEBUG_MODE ? " (Debug mode ON)" : ""));
 
 });
 
