@@ -6,7 +6,7 @@
 
   <meta charset="utf-8" />
 
-  <title>EV Route Chargers v1.16</title>
+  <title>EV Route Chargers v1.18 TEST</title>
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
@@ -391,6 +391,7 @@ main { max-width:1100px; margin:0 auto; padding:14px 16px 28px; }
 /* ------------------ CONFIG ------------------ */
 
 const ABC_AFIR_URL = "https://afir.digitraffic.fi/api/charging-network/v1/locations?operatorCountryCode=FI&operatorPartyId=ABC&limit=500";
+const ABC_TARIFF_URL = "https://afir.digitraffic.fi/api/charging-network/v1/tariffs/all";
 
 const OCM_PROXY_BASE = "https://ev-route-chargers.vercel.app/api/ocm";
 
@@ -790,6 +791,31 @@ function pointAlongRoute(coords, km) {
 
 
 
+// V1.18: haetaan asemia tasaisesti koko saavutettavan reittiosuuden varrelta.
+function routeLengthKm(coords) {
+  let total = 0;
+  for (let i = 1; i < coords.length; i++) total += haversineKm(coords[i-1][1], coords[i-1][0], coords[i][1], coords[i][0]);
+  return total;
+}
+function searchCentersAlongRoute(coords, usableKm) {
+  const limit = Math.min(usableKm, routeLengthKm(coords));
+  const distances = [0];
+  for (let d = 40; d < limit; d += 40) distances.push(d);
+  if (limit > 0 && limit - distances.at(-1) > 8) distances.push(limit);
+  return distances.map(km => pointAlongRoute(coords, km));
+}
+// Etäisyys reittiviivasta (linnuntietä): estää kaukana sivuteillä olevia
+// asemia syrjäyttämästä varsinaisen reitin latauspisteitä.
+function kmFromRoute(station, coords) {
+  let nearest = Infinity;
+  for (let i = 0; i < coords.length; i += 3) {
+    const c = coords[i];
+    nearest = Math.min(nearest, haversineKm(station.lat, station.lon, c[1], c[0]));
+  }
+  const last = coords.at(-1);
+  return Math.min(nearest, haversineKm(station.lat, station.lon, last[1], last[0]));
+}
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 
@@ -1016,6 +1042,48 @@ async function fetchOCM(lat, lon, km, maxresults = 25) {
 
 
 
+/* ------------------ PRICE TEST / AFIR ------------------ */
+// Tariff IDs live on connectors. Use IDs, never a name/coordinate heuristic.
+function abcTariffIds(properties) {
+  return [...new Set((properties.evses || []).flatMap(e => e.connectors || [])
+    .filter(c => String(c.powerType || '').toUpperCase() === 'DC')
+    .flatMap(c => Array.isArray(c.tariffIds) ? c.tariffIds : []))];
+}
+function abcEnergyPrice(tariff) {
+  if (!tariff || tariff.currency !== 'EUR') return null;
+  // One unambiguous unconditional energy component is required.
+  const elements = (tariff.elements || []).filter(e =>
+    (e.priceComponents || []).some(c => c.type === 'ENERGY'));
+  if (elements.length !== 1 || elements[0].restrictions) return null;
+  const component = elements[0].priceComponents.filter(c => c.type === 'ENERGY');
+  if (component.length !== 1 || !Number.isFinite(Number(component[0].price))) return null;
+  const taxStatus = tariff.taxIncluded;
+  if (taxStatus !== 'YES' && taxStatus !== 'NO') return null;
+  const vat = Number(component[0].vat);
+  if (taxStatus === 'NO' && !Number.isFinite(vat)) return null;
+  return Number(component[0].price) * (taxStatus === 'NO' ? 1 + vat / 100 : 1);
+}
+function attachABCTariffs(stations, tariffs) {
+  const byId = new Map(tariffs.map(t => [String(t.id), t]));
+  for (const station of stations) {
+    const ids = station.tariffIds || [];
+    const prices = ids.map(id => byId.get(String(id))).filter(Boolean)
+      .map(t => ({ value: abcEnergyPrice(t), tariff: t }));
+    // Do not show an ambiguous price for stations with multiple differing tariffs.
+    if (prices.length !== ids.length || !prices.length ||
+        prices.some(p => p.value === null || Math.abs(p.value - prices[0].value) > 0.0001)) continue;
+    station.energyPrice = prices[0].value;
+    station.priceUpdated = prices.map(p => p.tariff.lastUpdated).filter(Boolean).sort()[0] || null;
+    station.priceNote = 'Digitraffic / AD_HOC_PAYMENT; mahdolliset aikamaksut erikseen';
+  }
+}
+function energyPriceDisplay(station) {
+  if (station.operator !== 'ABC' || station.source !== 'Digitraffic') return 'Hintaa ei saatavilla';
+  if (!Number.isFinite(station.energyPrice)) return 'Hintaa ei saatavilla';
+  return new Intl.NumberFormat('fi-FI', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+    .format(station.energyPrice) + ' €/kWh (sis. ALV)';
+}
+
 /* ------------------ ABC / DIGITRAFFIC ------------------ */
 
 function isABC(operator, title) {
@@ -1068,7 +1136,9 @@ async function fetchABCDigitraffic(target, radiusKm, sharedJson = null) {
 
       lat, lon, maxPower: Math.max(0, ...dcPowers), isDC: true,
 
-      operator: "ABC", dist, source: "Digitraffic" };
+      operator: "ABC", dist, source: "Digitraffic",
+      tariffIds: abcTariffIds(p),
+      address: [a.street, a.city].filter(Boolean).join(", ") };
 
   }).filter(Boolean);
 
@@ -1458,6 +1528,32 @@ function fitWholeRoute() {
 
 }
 
+// TEST 1: nykyinen koordinaattinavigointi voi kadottaa latauspaikan identiteetin.
+// Google Maps -haku avaa nimettyä latauskohdetta vastaavan hakunäkymän.
+// Käyttäjä varmistaa kartasta, että valittu kohde on nimenomaan DC-latausasema.
+function chargingStationSearchUrl(station) {
+  const title = String(station.title || "").trim();
+  const address = String(station.address || "").trim();
+  const operator = String(station.operator || "").trim();
+  // ABC:n liikenneasema ja latauskohde ovat Google Mapsissa eri paikkoja.
+  // Tämä Renkomäen latauskohde vahvistettiin iPhonessa ja Volvo EX30:ssa.
+  if ((operator.toUpperCase() === "ABC" || /\bABC\b/i.test(title)) &&
+      /renkomäki/i.test(title + " " + address) && /lahti/i.test(title + " " + address)) {
+    return "https://maps.app.goo.gl/Vkg9qwCxPwA4buc69";
+  }
+  // Muilla ABC-asemilla haetaan lataustoimipistettä, ei samannimistä huoltoasemaa.
+  // Tämä on haku, ei varmistettu Places-kohdetunniste: tarkista Google Mapsin luokitus.
+  const abc = operator.toUpperCase() === "ABC" || /\bABC\b/i.test(title);
+  const query = abc
+    ? ["ABC-Lataus", address || title].filter(Boolean).join(" ")
+    : [operator || title, "sähköauton latausasema", address].filter(Boolean).join(" ");
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+function coordinateNavigationUrl(station) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(station.lat + "," + station.lon)}&travelmode=driving`;
+}
+
 function renderResults(final, suffix = "", usableKm = null) {
 
   elList.innerHTML = "";
@@ -1566,12 +1662,18 @@ function renderResults(final, suffix = "", usableKm = null) {
 
         </div>
 
-        <button class="primary card-nav">Navigoi</button>
+        <button class="primary card-charge-search" type="button">Avaa latauskohde</button>
 
       </div>
 
       <button class="card-map-link" type="button">📍 Näytä kartalla #${stationNumber}</button>
+      <button class="ghost card-nav" type="button">Navigoi koordinaatteihin (varalla)</button>
+      <div class="small" style="margin-top:6px;color:#475569">Avaa latauskohde → varmista Google Mapsista luokitus ”Sähköauton latausasema” → Reittiohjeet → Lähetä autoon. Renkomäellä käytetään testattua latauskohdetta; muilla asemilla Google Maps -haku pitää vielä tarkistaa.</div>
 
+      <div class="card-price" style="margin:8px 0;padding:10px;border:1px solid #cbd5e1;border-radius:10px;">
+        <strong>⚡ ${energyPriceDisplay(r)}</strong>
+        ${Number.isFinite(r.energyPrice) ? `<div class="small">Digitraffic: kertamaksun energiahinta; mahdolliset aika-/pysäköintimaksut erikseen.${r.priceUpdated ? ' Päivitetty '+r.priceUpdated.slice(0,10)+'.' : ''} Tarkista hinta ennen latausta.</div>` : `<div class="small">Lataushintaa ei ole vahvistettu tälle pisteelle.</div>`}
+      </div>
       <div class="card-details">
 
         <span><strong>${r.maxPower > 0 ? Math.round(r.maxPower) + " kW" : "Teho ei tiedossa"}</strong></span>
@@ -1592,9 +1694,11 @@ function renderResults(final, suffix = "", usableKm = null) {
 
     card.querySelector(".card-map-link").onclick = focusStation;
 
-    card.querySelector(".card-nav").onclick = () =>
+    card.querySelector(".card-charge-search").onclick = () =>
+      window.open(chargingStationSearchUrl(r), "_blank");
 
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lon}`, "_blank");
+    card.querySelector(".card-nav").onclick = () =>
+      window.open(coordinateNavigationUrl(r), "_blank");
 
     elList.appendChild(card);
 
@@ -1651,6 +1755,8 @@ function mapPoisToResults(pois, target, allowOps, abcResults = null) {
       isDC,
 
       operator,
+
+      address: [ai.AddressLine1, ai.Town, ai.StateOrProvince].filter(Boolean).join(", "),
 
       dist: haversineKm(target.lat, target.lon, Number(ai.Latitude), Number(ai.Longitude))
 
@@ -1885,6 +1991,15 @@ async function runSearch() {
       }
 
       abcResults = [...abcById.values()];
+      // Optional enrichment: a tariff service failure must never block route results.
+      try {
+        const tariffJson = await fetchJsonWithTimeout(ABC_TARIFF_URL, 15000);
+        const tariffs = Array.isArray(tariffJson?.tariffs) ? tariffJson.tariffs : [];
+        attachABCTariffs(abcResults, tariffs);
+        dbg('ABC prices resolved:', abcResults.filter(s => Number.isFinite(s.energyPrice)).length);
+      } catch (priceError) {
+        dbg('ABC tariffs unavailable; stations still shown:', String(priceError));
+      }
 
     } catch (e) {
 
@@ -1906,7 +2021,16 @@ async function runSearch() {
 
     const pois = [...poisById.values()];
 
-    const { mapped, filteredByOp, fastCount, final } = mapPoisToResults(pois, target, allowOps, abcResults);
+    const stationData = mapPoisToResults(pois, target, allowOps, abcResults);
+    const { mapped, filteredByOp, fastCount } = stationData;
+    // Kartoitetaan etäisyys reittiviivasta ennen raskaita OSRM-kyselyjä.
+    // 20 km käytävä sallii lähellä olevat liittymät, mutta jättää kaukaiset sivutiet pois.
+    const final = filteredByOp
+      .map(r => ({...r, corridorKm: kmFromRoute(r, route)}))
+      .filter(r => r.corridorKm <= 20)
+      .sort((a,b) => a.corridorKm-b.corridorKm || b.maxPower-a.maxPower)
+      .slice(0,60);
+    dbg("Löydetyt, suodatetut ja reittikäytävässä:", mapped.length, filteredByOp.length, final.length);
 
 
 
@@ -1970,9 +2094,12 @@ async function runSearch() {
 
     const checked = verifiedResults.map(r => ({...r, rangeStatus: !Number.isFinite(r.roadKm) ? "unknown" : r.roadKm <= usableKm ? "within" : "outside", shortfallKm: Number.isFinite(r.roadKm) ? Math.max(0, r.roadKm - usableKm) : null}));
 
-    const reachable = checked.filter(r => r.rangeStatus === "within").sort((a,b) => b.roadKm-a.roadKm || b.maxPower-a.maxPower);
-
-    const others = checked.filter(r => r.rangeStatus !== "within").sort((a,b) => (a.roadKm ?? Infinity)-(b.roadKm ?? Infinity));
+    // Vain kohtuullisella lisämatkalla olevat ehdokkaat varsinaisiin suosituksiin.
+    // Jos OSRM ei vahvista lisämatkaa, asema jää erilliseksi epävarmaksi vaihtoehdoksi.
+    const sensible = checked.filter(r => r.detourVerified && Number.isFinite(r.detourKm) && r.detourKm <= 20);
+    const reachable = sensible.filter(r => r.rangeStatus === "within").sort((a,b) => b.roadKm-a.roadKm || b.maxPower-a.maxPower);
+    const others = checked.filter(r => !sensible.includes(r) || r.rangeStatus !== "within")
+      .sort((a,b) => (a.detourKm ?? Infinity)-(b.detourKm ?? Infinity) || (a.roadKm ?? Infinity)-(b.roadKm ?? Infinity));
 
     // Kolme lähellä tavoitekohtaa ja kaksi aikaisempaa vaihtoehtoa.
 
@@ -1994,18 +2121,15 @@ async function runSearch() {
 
     };
 
-    const nearTarget = reachable.slice(0,3).sort((a,b) => recommendationScore(a)-recommendationScore(b));
-
-    const early = reachable.filter(r => !nearTarget.includes(r)).sort((a,b) => a.roadKm-b.roadKm).slice(0,2);
-
+    const nearTarget = [...reachable].sort((a,b) => recommendationScore(a)-recommendationScore(b)).slice(0,5);
+    // Näytetään myös aiemmat, reitille hyvin sopivat latauspaikat; ne eivät
+    // saa pudota pois vain siksi, että ovat kauempana latausrajasta.
+    const early = reachable.filter(r => !nearTarget.includes(r))
+      .sort((a,b) => a.detourKm-b.detourKm || b.maxPower-a.maxPower).slice(0,5);
     const shown = [
-
       ...nearTarget.map(r => ({...r, resultGroup:"recommended"})),
-
       ...early.map(r => ({...r, resultGroup:"early"})),
-
-      ...others.slice(0,5).map(r => ({...r, resultGroup:"outside"}))
-
+      ...others.slice(0,3).map(r => ({...r, resultGroup:"outside"}))
     ];
 
     saveLast({ route, target, usableKm, results: shown, savedAt: Date.now() });
@@ -2020,7 +2144,7 @@ async function runSearch() {
 
 
 
-    renderResults(shown, ` (toimintamatkan sisällä ${reachable.length}, muut/varmistamattomat ${others.length}; mukana myös aikaisempia asemia)` + (abcResults === null ? " (ABC: OCM-varatiedot)" : " (ABC: Digitraffic)"), usableKm);
+    renderResults(shown, ` (reitin varrella ja toimintamatkan sisällä ${reachable.length}, muut/varmistamattomat ${others.length}; mukana myös aikaisempia asemia)` + (abcResults === null ? " (ABC: OCM-varatiedot)" : " (ABC: Digitraffic)"), usableKm);
 
     // Siirry mobiilissa tuloksiin vasta uuden haun valmistuttua.
 
@@ -2108,7 +2232,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initMap();
 
-  setStatus("EV Route v1.16 – ABC Digitraffic. Syötä määränpää ja hae seuraava lataus." + (DEBUG_MODE ? " (Debug mode ON)" : ""));
+  setStatus("EV Route v1.19 PRICE TEST – ABC Digitraffic. Syötä määränpää ja hae seuraava lataus." + (DEBUG_MODE ? " (Debug mode ON)" : ""));
 
 });
 
