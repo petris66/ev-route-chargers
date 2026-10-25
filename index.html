@@ -6,7 +6,7 @@
 
   <meta charset="utf-8" />
 
-  <title>EV Route Chargers v1.18 TEST</title>
+  <title>EV Route Chargers v1.23.1 ABC PRICE TEST</title>
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
@@ -1051,31 +1051,57 @@ function abcTariffIds(properties) {
 }
 function abcEnergyPrice(tariff) {
   if (!tariff || tariff.currency !== 'EUR') return null;
-  // One unambiguous unconditional energy component is required.
-  const elements = (tariff.elements || []).filter(e =>
-    (e.priceComponents || []).some(c => c.type === 'ENERGY'));
-  if (elements.length !== 1 || elements[0].restrictions) return null;
-  const component = elements[0].priceComponents.filter(c => c.type === 'ENERGY');
-  if (component.length !== 1 || !Number.isFinite(Number(component[0].price))) return null;
-  const taxStatus = tariff.taxIncluded;
-  if (taxStatus !== 'YES' && taxStatus !== 'NO') return null;
-  const vat = Number(component[0].vat);
-  if (taxStatus === 'NO' && !Number.isFinite(vat)) return null;
-  return Number(component[0].price) * (taxStatus === 'NO' ? 1 + vat / 100 : 1);
+  if (!['YES', 'NO'].includes(tariff.taxIncluded)) return null;
+  const components = [];
+  for (const element of (tariff.elements || [])) {
+    for (const component of (element.priceComponents || [])) {
+      if (component.type !== 'ENERGY') continue;
+      const amount = Number(component.price);
+      const vat = Number(component.vat);
+      if (!Number.isFinite(amount) || (tariff.taxIncluded === 'NO' && !Number.isFinite(vat))) return null;
+      const r = element.restrictions || {};
+      // Only unconditional or clock-time-constrained prices are supported here.
+      if (Object.keys(r).some(k => !['startTime','endTime'].includes(k))) return null;
+      if ((r.startTime && !r.endTime) || (!r.startTime && r.endTime)) return null;
+      components.push({
+        price: amount * (tariff.taxIncluded === 'NO' ? 1 + vat / 100 : 1),
+        startTime: r.startTime || null,
+        endTime: r.endTime || null
+      });
+    }
+  }
+  if (components.length === 1 && !components[0].startTime) return { kind: 'flat', entries: components };
+  // Reject incomplete or ambiguous time schedules: exactly two distinct slots.
+  if (components.length === 2 && components.every(c => c.startTime && c.endTime)) {
+    const [x,y] = components;
+    if (x.endTime === y.startTime && y.endTime === x.startTime && x.startTime !== y.startTime)
+      return { kind: 'timed', entries: components };
+  }
+  return null;
 }
 function attachABCTariffs(stations, tariffs) {
   const byId = new Map(tariffs.map(t => [String(t.id), t]));
   for (const station of stations) {
     const ids = station.tariffIds || [];
-    const prices = ids.map(id => byId.get(String(id))).filter(Boolean)
-      .map(t => ({ value: abcEnergyPrice(t), tariff: t }));
-    // Do not show an ambiguous price for stations with multiple differing tariffs.
-    if (prices.length !== ids.length || !prices.length ||
-        prices.some(p => p.value === null || Math.abs(p.value - prices[0].value) > 0.0001)) continue;
-    station.energyPrice = prices[0].value;
-    station.priceUpdated = prices.map(p => p.tariff.lastUpdated).filter(Boolean).sort()[0] || null;
+    if (!ids.length) continue;
+    const found = ids.map(id => byId.get(String(id)));
+    if (found.some(x => !x)) continue;
+    const parsed = found.map(abcEnergyPrice);
+    if (parsed.some(x => !x)) continue;
+    const signature = p => JSON.stringify(p.entries.slice().sort((a,b) => String(a.startTime).localeCompare(String(b.startTime))));
+    if (parsed.some(p => p.kind !== parsed[0].kind || signature(p) !== signature(parsed[0]))) continue;
+    const result = parsed[0];
+    if (result.kind === 'flat') station.energyPrice = result.entries[0].price;
+    else station.abcTimedPrices = result.entries;
+    station.priceUpdated = found.map(p => p.lastUpdated).filter(Boolean).sort()[0] || null;
     station.priceNote = 'Digitraffic / AD_HOC_PAYMENT; mahdolliset aikamaksut erikseen';
   }
+}
+function abcPriceLabel(station, fmt) {
+  if (Array.isArray(station.abcTimedPrices) && station.abcTimedPrices.length === 2) {
+    return station.abcTimedPrices.map(p => `${p.startTime}–${p.endTime} ${fmt(p.price)} €/kWh`).join(' · ') + ' (sis. ALV)';
+  }
+  return Number.isFinite(station.energyPrice) ? fmt(station.energyPrice)+' €/kWh (sis. ALV)' : 'Hintaa ei saatavilla';
 }
 // OPERATOR PRICE TEST. K-Lataus uses published registered-customer base DC
 // rates; they are NOT live station-specific rates. Neste night price applies
@@ -1180,7 +1206,7 @@ function isNesteNightLocation(station) {
 function energyPriceDisplay(station) {
   const fmt = v => new Intl.NumberFormat('fi-FI', {minimumFractionDigits:2,maximumFractionDigits:2}).format(v);
   if (station.operator === 'ABC' && station.source === 'Digitraffic') {
-    return Number.isFinite(station.energyPrice) ? fmt(station.energyPrice)+' €/kWh (sis. ALV)' : 'Hintaa ei saatavilla';
+    return abcPriceLabel(station, fmt);
   }
   if (!(station.isDC && Number(station.maxPower) > 50)) return 'Suurteholatauksen hintaa ei saatavilla';
   const op = stationKind(station);
@@ -1193,7 +1219,7 @@ function energyPriceDisplay(station) {
 }
 function priceDetailsDisplay(station) {
   if (station.operator === 'ABC' && station.source === 'Digitraffic') {
-    return Number.isFinite(station.energyPrice)
+    return (Number.isFinite(station.energyPrice) || Array.isArray(station.abcTimedPrices))
       ? `Digitraffic: kertamaksun energiahinta; mahdolliset aika-/pysäköintimaksut erikseen.${station.priceUpdated ? ' Päivitetty '+station.priceUpdated.slice(0,10)+'.' : ''} Tarkista hinta ennen latausta.`
       : 'Lataushintaa ei ole vahvistettu tälle pisteelle.';
   }
@@ -2119,7 +2145,7 @@ async function runSearch() {
         const tariffJson = await fetchJsonWithTimeout(ABC_TARIFF_URL, 15000);
         const tariffs = Array.isArray(tariffJson?.tariffs) ? tariffJson.tariffs : [];
         attachABCTariffs(abcResults, tariffs);
-        dbg('ABC prices resolved:', abcResults.filter(s => Number.isFinite(s.energyPrice)).length);
+        dbg('ABC prices resolved:', abcResults.filter(s => Number.isFinite(s.energyPrice) || Array.isArray(s.abcTimedPrices)).length);
       } catch (priceError) {
         dbg('ABC tariffs unavailable; stations still shown:', String(priceError));
       }
@@ -2355,7 +2381,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initMap();
 
-  setStatus("EV Route v1.23 PRICE TEST – ABC Digitraffic. Syötä määränpää ja hae seuraava lataus." + (DEBUG_MODE ? " (Debug mode ON)" : ""));
+  setStatus("EV Route v1.23.1 ABC PRICE TEST – ABC Digitraffic. Syötä määränpää ja hae seuraava lataus." + (DEBUG_MODE ? " (Debug mode ON)" : ""));
 
 });
 
